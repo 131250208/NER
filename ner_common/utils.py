@@ -166,6 +166,8 @@ class Preprocessor:
                         if tok_span[0] >= start_ind and tok_span[1] <= end_ind:
                             new_term = copy.deepcopy(term)
                             new_term["tok_span"] = [tok_span[0] - start_ind, tok_span[1] - start_ind]
+                            new_term["char_span"][0] -= char_span[0]
+                            new_term["char_span"][1] -= char_span[0]
                             sub_entity_list.append(new_term)
 
                     if len(sub_entity_list) > 0:

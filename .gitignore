@@ -1,5 +1,6 @@
 # self-defined
 wandb/
+*model*/
 *data*/
 results/
 *.yaml
