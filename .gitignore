@@ -1,6 +1,9 @@
 # self-defined
 wandb/
 *data*/
+results/
+*.yaml
+*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
