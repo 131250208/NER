@@ -8,19 +8,19 @@ class Preprocessor:
         self._get_tok2char_span_map = get_tok2char_span_map_func
         self._tokenize = tokenize_func
     
-    def clean_data_wo_span(self, ori_data, data_type = "train"):
+    def clean_data_wo_span(self, ori_data, separate = False, data_type = "train"):
         '''
         rm duplicate whitespaces
-        and add whitespaces around tokens to keep special characters from them
+        and separate special characters from tokens
         '''
         def clean_text(text):
             text = re.sub("\s+", " ", text).strip()
-            text = re.sub("([A-Za-z0-9]+)", r" \1 ", text)
-    #         text = re.sub("(\d+)", r" \1 ", text)
-            text = re.sub("\s+", " ", text).strip()
+            if separate:
+                text = re.sub("([^A-Za-z0-9])", r" \1 ", text)
+                text = re.sub("\s+", " ", text).strip()
             return text
 
-        for sample in tqdm(ori_data, desc = "clean"):
+        for sample in tqdm(ori_data, desc = "separate characters by white"):
             sample["text"] = clean_text(sample["text"])
             if data_type == "test":
                 continue
@@ -32,6 +32,18 @@ class Preprocessor:
         '''
         add a stake to bad samples and remove them from the clean data
         '''
+        def strip_white(entity, entity_char_span):
+            p = 0
+            while entity[p] == " ":
+                entity_char_span[0] += 1
+                p += 1
+
+            p = len(entity) - 1
+            while entity[p] == " ":
+                entity_char_span[1] -= 1
+                p -= 1
+            return entity.strip(), entity_char_span
+        
         bad_samples, clean_data = [], []
         for sample in tqdm(ori_data, desc = "cleaning"):
             text = sample["text"]
@@ -39,15 +51,8 @@ class Preprocessor:
             bad = False
             for ent in sample["entity_list"]:
                 # rm whitespaces
-                p = 0
-                while ent["text"][p] == " ":
-                    ent["char_span"][0] += 1
-                    p += 1
-                p = len(ent["text"]) - 1
-                while ent["text"][p] == " ":
-                    ent["char_span"][1] -= 1
-                    p -= 1
-
+                ent["text"], ent["char_span"] = strip_white(ent["text"], ent["char_span"])
+                
                 char_span = ent["char_span"]
                 if ent["text"] not in text or ent["text"] != text[char_span[0]:char_span[1]]:
                     ent["stake"] = 0
@@ -81,22 +86,29 @@ class Preprocessor:
                 tok_sp[1] = tok_ind + 1
         return char2tok_span
     
-    def _get_ent2char_spans(self, text, entities):
+    def _get_ent2char_spans(self, text, entities, ignore_subword = True):
+        '''
+        if ignore_subword, look for entities with whitespace around, e.g. "entity" -> " entity "
+        '''
         entities = sorted(entities, key = lambda x: len(x), reverse = True)
-        text_cp = " {} ".format(text[:])
+        text_cp = " {} ".format(text) if ignore_subword else text
         ent2char_spans = {}
         for ent in entities:
             spans = []
-            for m in re.finditer(re.escape(" {} ".format(ent)), text_cp):
-                span = [m.span()[0], m.span()[1] - 2]
+            target_ent = " {} ".format(ent) if ignore_subword else ent
+            for m in re.finditer(re.escape(target_ent), text_cp):
+                span = [m.span()[0], m.span()[1] - 2] if ignore_subword else m.span()
                 spans.append(span)
+#             if len(spans) == 0:
+#                 set_trace()
             ent2char_spans[ent] = spans
         return ent2char_spans
     
-    def add_char_span(self, dataset):
+    def add_char_span(self, dataset, ignore_subword = True):
+        miss_sample_list = []
         for sample in tqdm(dataset, desc = "Adding char level spans"):
             entities = [ent["text"] for ent in sample["entity_list"]]
-            ent2char_spans = self._get_ent2char_spans(sample["text"], entities)
+            ent2char_spans = self._get_ent2char_spans(sample["text"], entities, ignore_subword = ignore_subword)
             
             # filter 
             ent_memory_set = set()
@@ -116,8 +128,12 @@ class Preprocessor:
                         "type": ent["type"],
                         "char_span": sp,
                     })
+                    
+            if len(sample["entity_list"]) > len(new_ent_list):
+                miss_sample_list.append(sample)
             sample["entity_list"] = new_ent_list
-        
+        return dataset, miss_sample_list
+    
     def add_tok_span(self, data):
         '''
         data: must has char span
@@ -130,7 +146,8 @@ class Preprocessor:
                 tok_span_list = char2tok_span[char_span[0]:char_span[1]]
                 tok_span = [tok_span_list[0][0], tok_span_list[-1][1]]
                 ent["tok_span"] = tok_span
-                
+        return data
+    
     def split_into_short_samples(self, sample_list, max_seq_len, sliding_len = 50, encoder = "BERT", data_type = "train"):
         new_sample_list = []
         for sample in tqdm(sample_list, desc = "Splitting"):
