@@ -411,14 +411,15 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
             avg_loss = total_loss / (batch_ind + 1)
             avg_sample_acc = total_sample_acc / (batch_ind + 1)
             
-            batch_print_format = "\rEpoch: {}/{}, batch: {}/{}, train_loss: {}, t_sample_acc: {}, lr: {}, batch_time: {}------------------------"
-            print(batch_print_format.format(ep + 1, num_epoch, 
-                                            batch_ind + 1, len(dataloader), 
-                                            avg_loss, 
-                                            avg_sample_acc,
-                                            optimizer.param_groups[0]['lr'],
-                                            time.time() - t_batch), end="")
-            
+            batch_print_format = "\rproject: {}, run_name: {}, Epoch: {}/{}, batch: {}/{}, train_loss: {}, t_sample_acc: {}, lr: {}, batch_time: {}------------------------"
+            print(batch_print_format.format(experiment_name, config["run_name"], 
+                                ep + 1, num_epoch, 
+                                batch_ind + 1, len(dataloader), 
+                                avg_loss, 
+                                avg_sample_acc,
+                                optimizer.param_groups[0]['lr'],
+                                time.time() - t_batch), end="")
+
             if config["wandb"] is True and batch_ind % hyper_parameters["log_interval"] == 0:
                 logger.log({
                     "train_loss": avg_loss,
