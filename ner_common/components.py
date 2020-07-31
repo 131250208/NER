@@ -7,10 +7,15 @@ class HandshakingKernel(nn.Module):
     def __init__(self, visual_field, fake_inputs, shaking_type):
         super().__init__()
         hidden_size = fake_inputs.size()[-1]
-        self.cond_layer_norm = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+        
         self.shaking_type = shaking_type
         self.visual_field = visual_field
-        if shaking_type == "cat":
+        if shaking_type == "cln":
+            self.cond_layer_norm = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+        elif shaking_type == "cln_plus":
+            self.tok_pair_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.full_hiddens_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+        elif shaking_type == "cat":
             self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
         elif shaking_type == "res_gate":
             self.Wg = nn.Linear(hidden_size, hidden_size)
@@ -30,10 +35,17 @@ class HandshakingKernel(nn.Module):
         for ind in range(seq_len):            
             hidden_each_step = seq_hiddens[:, ind, :]
             # seq_len - ind: only shake afterwards
-            repeat_hiddens = hidden_each_step[:, None, :].repeat(1, min(seq_len - ind, self.visual_field), 1)  
+            repeat_len = min(seq_len - ind, self.visual_field)
+            repeat_hiddens = hidden_each_step[:, None, :].repeat(1, repeat_len, 1)  
             after_hiddens = seq_hiddens[:, ind:ind + self.visual_field, :]
+            # full_hiddens4entity
+            full_ent_hiddens_mean = torch.stack([torch.mean(after_hiddens[:, :i+1, :], dim = 1) for i in range(repeat_len)], dim = 1)
+#             set_trace()
             if self.shaking_type == "cln":
                 shaking_hiddens = self.cond_layer_norm(after_hiddens, repeat_hiddens)
+            elif self.shaking_type == "cln_plus":
+                shaking_hiddens = self.tok_pair_cln(after_hiddens, repeat_hiddens)
+                shaking_hiddens = self.full_hiddens_cln(shaking_hiddens, full_ent_hiddens_mean)
             elif self.shaking_type == "cat":
                 shaking_hiddens = torch.cat([repeat_hiddens, after_hiddens], dim = -1)
                 shaking_hiddens = torch.tanh(self.combine_fc(shaking_hiddens))
@@ -88,7 +100,8 @@ class LayerNorm(nn.Module):
                     torch.nn.init.normal(self.hidden_dense.weight)
                 elif self.hidden_initializer == 'xavier':  # glorot_uniform
                     torch.nn.init.xavier_uniform_(self.hidden_dense.weight)
-            # 下面这两个为什么都初始化为0呢?
+            # 下面这两个为什么都初始化为0呢? 
+            # 为了防止扰乱原来的预训练权重，两个变换矩阵可以全零初始化（单层神经网络可以用全零初始化，连续的多层神经网络才不应当用全零初始化），这样在初始状态，模型依然保持跟原来的预训练模型一致。
             if self.center:
                 torch.nn.init.constant_(self.beta_dense.weight, 0)
             if self.scale:
@@ -104,8 +117,11 @@ class LayerNorm(nn.Module):
                 cond = self.hidden_dense(cond)
             # for _ in range(K.ndim(inputs) - K.ndim(cond)): # K.ndim: 以整数形式返回张量中的轴数。
             # TODO: 这两个为什么有轴数差呢？ 为什么在 dim=1 上增加维度??
+            # 为了保持维度一致，cond可以是（batch_size, cond_dim）
             for _ in range(len(inputs.shape) - len(cond.shape)):
                 cond = cond.unsqueeze(1)  # cond = K.expand_dims(cond, 1)
+            
+            # cond在加入beta和gamma之前做一次变换，保证维度一致
             if self.center:
                 # print(self.beta_dense.weight.shape, cond.shape)
                 self.beta_dense(cond)

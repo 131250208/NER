@@ -20,7 +20,7 @@ class Preprocessor:
                 text = re.sub("\s+", " ", text).strip()
             return text
 
-        for sample in tqdm(ori_data, desc = "separate characters by white"):
+        for sample in tqdm(ori_data, desc = "clean data wo span"):
             sample["text"] = clean_text(sample["text"])
             if data_type == "test":
                 continue
@@ -45,7 +45,7 @@ class Preprocessor:
             return entity.strip(), entity_char_span
         
         bad_samples, clean_data = [], []
-        for sample in tqdm(ori_data, desc = "cleaning"):
+        for sample in tqdm(ori_data, desc = "clean data w span"):
             text = sample["text"]
 
             bad = False
