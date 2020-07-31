@@ -417,7 +417,6 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
                                 avg_sample_acc,
                                 optimizer.param_groups[0]['lr'],
                                 time.time() - t_batch), end="")
-            
             if config["wandb"] is True and batch_ind % hyper_parameters["log_interval"] == 0:
                 logger.log({
                     "train_loss": avg_loss,
