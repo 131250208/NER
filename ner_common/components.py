@@ -43,6 +43,8 @@ class HandshakingKernel(nn.Module):
 #             set_trace()
             if self.shaking_type == "cln":
                 shaking_hiddens = self.cond_layer_norm(after_hiddens, repeat_hiddens)
+            elif self.shaking_type == "full_hiddens":
+                shaking_hiddens = full_ent_hiddens_mean
             elif self.shaking_type == "cln_plus":
                 shaking_hiddens = self.tok_pair_cln(after_hiddens, repeat_hiddens)
                 shaking_hiddens = self.full_hiddens_cln(shaking_hiddens, full_ent_hiddens_mean)
@@ -123,8 +125,6 @@ class LayerNorm(nn.Module):
             
             # cond在加入beta和gamma之前做一次变换，保证维度一致
             if self.center:
-                # print(self.beta_dense.weight.shape, cond.shape)
-                self.beta_dense(cond)
                 beta = self.beta_dense(cond) + self.beta
             if self.scale:
                 gamma = self.gamma_dense(cond) + self.gamma

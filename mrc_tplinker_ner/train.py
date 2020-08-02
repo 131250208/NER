@@ -21,9 +21,9 @@ from pprint import pprint
 import glob
 import time
 from ner_common.utils import Preprocessor
-from tplinker_ner import (HandshakingTaggingScheme, 
+from mrc_tplinker_ner import (HandshakingTaggingScheme, 
                           DataMaker, 
-                          TPLinkerNER, 
+                          MRCTPLinkerNER, 
                           Metrics)
 import json
 import wandb
@@ -80,18 +80,27 @@ else:
 # In[5]:
 
 
-max_seq_len = hyper_parameters["max_seq_len"]
-pred_max_seq_len = hyper_parameters["pred_max_seq_len"]
+data_home = config["data_home"]
+max_seq_len_t1 = hyper_parameters["max_seq_len"] # max sequence length of text 1
+meta_path = os.path.join(data_home, experiment_name, config["meta"])
+meta = json.load(open(meta_path, "r", encoding = "utf-8"))
+tags = meta["tags"]
+type2questions = meta["type2questions"]
+pred_max_seq_len_t1 = hyper_parameters["pred_max_seq_len"]
 batch_size = hyper_parameters["batch_size"]
 epoch_num = hyper_parameters["epochs"]
 visual_field = hyper_parameters["visual_field"]
-model_path = config["bert_path"]
+encoder_path = config["bert_path"]
+tokenizer = BertTokenizerFast.from_pretrained(encoder_path, add_special_tokens = False, do_lower_case = False)
+max_seq_len_question = max([len(tokenizer.tokenize(q)) for questions in type2questions.values() for q in questions])
+max_seq_len = max_seq_len_t1 + max_seq_len_question + 1  # +1: [SEP]
+pred_max_seq_len = pred_max_seq_len_t1 + max_seq_len_question + 1
+assert max_seq_len <= 512 and pred_max_seq_len <= 512
+train_sliding_len = hyper_parameters["sliding_len"]
+pred_sliding_len = hyper_parameters["pred_sliding_len"]
 init_learning_rate = float(hyper_parameters["lr"])
-
-data_home = config["data_home"]
 train_data_path = os.path.join(data_home, experiment_name, config["train_data"])
 valid_data_path = os.path.join(data_home, experiment_name, config["valid_data"])
-meta_path = os.path.join(data_home, experiment_name, config["meta"])
 
 
 # # Load Data
@@ -108,7 +117,6 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 # In[7]:
 
 
-tokenizer = BertTokenizerFast.from_pretrained(model_path, add_special_tokens = False, do_lower_case = False)
 def get_tok2char_span_map(text):
     tok2char_span = tokenizer.encode_plus(text, 
                                            return_offsets_mapping = True, 
@@ -126,8 +134,8 @@ preprocessor = Preprocessor(tokenize, get_tok2char_span_map)
 
 # split into short articles
 short_train_data = preprocessor.split_into_short_samples(train_data, 
-                                                          max_seq_len, 
-                                                          sliding_len = hyper_parameters["sliding_len"])
+                                                          max_seq_len_t1, 
+                                                          sliding_len = train_sliding_len)
 
 
 # In[9]:
@@ -144,10 +152,10 @@ max_tok_num_valid
 # In[10]:
 
 
-if max_tok_num_valid > pred_max_seq_len:
+if max_tok_num_valid > pred_max_seq_len_t1:
     short_valid_data = preprocessor.split_into_short_samples(valid_data, 
-                                                              pred_max_seq_len, 
-                                                              sliding_len = hyper_parameters["sliding_len"])
+                                                              pred_max_seq_len_t1, 
+                                                              sliding_len = pred_sliding_len)
 
 
 # In[11]:
@@ -170,8 +178,6 @@ if max_tok_num_valid > pred_max_seq_len:
 # In[12]:
 
 
-meta = json.load(open(meta_path, "r", encoding = "utf-8"))
-tags = meta["tags"]
 if meta["visual_field_rec"] > visual_field:
     visual_field = meta["visual_field_rec"]
     print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(visual_field))
@@ -198,42 +204,54 @@ def sample_equal_to(sample1, sample2):
 # In[14]:
 
 
-handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len, visual_field)
+handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len_t1, visual_field)
+handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len_t1, visual_field)
 
 
 # In[15]:
 
 
 # # check tagging and decoding
-# data4check = short_train_data + short_valid_data
-# for idx in tqdm(range(0, len(data4check), batch_size)):
-#     batch_matrix_spots = []
-#     batch_data = data4check[idx:idx + batch_size]
-#     for sample in batch_data:
-#         matrix_spots = handshaking_tagger.get_spots(sample)
-# #         %timeit shaking_tagger.get_spots(sample)
-#         batch_matrix_spots.append(matrix_spots)
-    
-#     # tagging
-#     # batch_shaking_tag: (batch_size, shaking_tag, tag_size)
-#     batch_shaking_tag = handshaking_tagger.spots2shaking_tag4batch(batch_matrix_spots)
-# #     %timeit shaking_tagger.spots2shaking_tag4batch(batch_matrix_spots) #0.3s
-    
-#     for batch_idx in range(len(batch_data)):
-#         gold_sample = batch_data[batch_idx]
-#         shaking_tag = batch_shaking_tag[batch_idx]
-#         # decode
-#         text = gold_sample["text"]
-#         tok2char_span = get_tok2char_span_map(text)
-#         ent_list = handshaking_tagger.decode_ent(text, shaking_tag, tok2char_span)
-#         pred_sample = {
-#             "text": text,
-#             "id": gold_sample["id"],
-#             "entity_list": ent_list,
-#         }
-        
-#         if not sample_equal_to(pred_sample, gold_sample) or not sample_equal_to(gold_sample, pred_sample):
+# def check_tagging_n_decoding(data4check, handshaking_tagger):
+#     for sample in tqdm(data4check):
+#         batch_matrix_spots = []
+#         batch_sub_samples = []
+
+#         type2spots = handshaking_tagger.get_spots(sample)
+#         for type_, questions in type2questions.items():
+#             for q in questions:
+#                 sub_sample = copy.deepcopy(sample)
+#                 sub_sample["entity_list"] = [ent for ent in sample["entity_list"] if ent["type"] == type_]
+#                 sub_sample["question"] = q
+#                 batch_sub_samples.append(sub_sample)
+#                 batch_matrix_spots.append(type2spots[type_])
+
+#     #     set_trace()
+#         # tagging
+#         # batch_shaking_tag: (batch_size, shaking_tag, tag_size)
+#         batch_shaking_tag = handshaking_tagger.spots2shaking_tag4batch(batch_matrix_spots)
+#     #     %timeit shaking_tagger.spots2shaking_tag4batch(batch_matrix_spots) #0.3s
+
+#         # decoding
+#         ent_list = []
+#         for batch_idx in range(len(batch_sub_samples)):
+#             sub_sample = batch_sub_samples[batch_idx]
+#             text = sub_sample["text"]
+#             shaking_tag = batch_shaking_tag[batch_idx]
+#             # decode
+#             tok2char_span = get_tok2char_span_map(text)
+#             ent_list.extend(handshaking_tagger.decode_ent(sub_sample["question"], text, shaking_tag, tok2char_span))
+#         gold_sample = sample
+#         pred_sample = copy.deepcopy(gold_sample)
+#         pred_sample["entity_list"] = ent_list
+
+#         if not sample_equal_to(pred_sample, gold_sample):
 #             set_trace()
+#         if not sample_equal_to(gold_sample, pred_sample):
+#             set_trace()
+        
+# check_tagging_n_decoding(short_train_data, handshaking_tagger)
+# check_tagging_n_decoding(short_valid_data, handshaking_tagger4valid)
 
 
 # # Dataset
@@ -242,7 +260,6 @@ handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len, visual_field)
 
 
 data_maker = DataMaker(handshaking_tagger, tokenizer)
-handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, visual_field)
 data_maker4valid = DataMaker(handshaking_tagger4valid, tokenizer)
 
 
@@ -263,8 +280,8 @@ class MyDataset(Dataset):
 # In[18]:
 
 
-indexed_train_sample_list = data_maker.get_indexed_data(short_train_data, max_seq_len)
-indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data, pred_max_seq_len)
+indexed_train_sample_list = data_maker.get_indexed_data(short_train_data, max_seq_len, type2questions)
+indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data, pred_max_seq_len, type2questions)
 
 
 # In[19]:
@@ -290,8 +307,6 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 
 
 # # have a look at dataloader
-# train_dataloader, eval_dataloader = get_dataloader_gen(indexed_train_sample_list, indexed_eval_sample_list, 32)
-
 # train_data_iter = iter(train_dataloader)
 # batch_data = next(train_data_iter)
 # sample_list, batch_input_ids, \
@@ -313,7 +328,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 # In[21]:
 
 
-encoder = AutoModel.from_pretrained(model_path)
+encoder = AutoModel.from_pretrained(encoder_path)
 
 
 # In[22]:
@@ -321,7 +336,7 @@ encoder = AutoModel.from_pretrained(model_path)
 
 fake_input = torch.zeros([batch_size, max_seq_len, encoder.config.hidden_size]).to(device)
 shaking_type = hyper_parameters["shaking_type"]
-ent_extractor = TPLinkerNER(encoder, len(tags), fake_input, shaking_type, visual_field)
+ent_extractor = MRCTPLinkerNER(encoder, fake_input, shaking_type, visual_field)
 ent_extractor = ent_extractor.to(device)
 
 
@@ -330,6 +345,13 @@ ent_extractor = ent_extractor.to(device)
 
 metrics = Metrics(handshaking_tagger)
 metrics4valid = Metrics(handshaking_tagger4valid)
+
+def bias_loss(weights = None):
+    if weights is not None:
+        weights = torch.FloatTensor(weights).to(device)
+    cross_en = nn.CrossEntropyLoss(weight = weights)  
+    return lambda pred, target: cross_en(pred.view(-1, pred.size()[-1]), target.view(-1))
+loss_func = bias_loss()
 
 
 # In[24]:
@@ -350,9 +372,9 @@ def train_step(train_data, optimizer):
     # zero the parameter gradients
     optimizer.zero_grad()
     
-    batch_pred_shaking_outputs = ent_extractor(batch_input_ids, batch_attention_mask, batch_token_type_ids)
+    batch_pred_shaking_outputs = ent_extractor(batch_input_ids, batch_attention_mask, batch_token_type_ids, max_seq_len_t1)
 #     set_trace()
-    loss = metrics.loss_func(batch_pred_shaking_outputs, batch_gold_shaking_tag)
+    loss = loss_func(batch_pred_shaking_outputs, batch_gold_shaking_tag)
     
     # bp
 #     t1 = time.time()
@@ -360,7 +382,7 @@ def train_step(train_data, optimizer):
     optimizer.step()
 #     print("bp: {}".format(time.time() - t1)) 1s + 
     
-    batch_pred_shaking_tag = (batch_pred_shaking_outputs > 0.).long()
+    batch_pred_shaking_tag = torch.argmax(batch_pred_shaking_outputs, dim = -1)
     sample_acc = metrics.get_sample_accuracy(batch_pred_shaking_tag, batch_gold_shaking_tag)
 
     return loss.item(), sample_acc.item()
@@ -378,9 +400,9 @@ def valid_step(valid_data):
                              )
     
     with torch.no_grad():
-        batch_pred_shaking_outputs = ent_extractor(batch_input_ids, batch_attention_mask, batch_token_type_ids)
+        batch_pred_shaking_outputs = ent_extractor(batch_input_ids, batch_attention_mask, batch_token_type_ids, pred_max_seq_len_t1)
         
-    batch_pred_shaking_tag = (batch_pred_shaking_outputs > 0.).long()
+    batch_pred_shaking_tag = torch.argmax(batch_pred_shaking_outputs, dim = -1)
     
     sample_acc = metrics4valid.get_sample_accuracy(batch_pred_shaking_tag, batch_gold_shaking_tag)
     correct_num, pred_num, gold_num = metrics4valid.get_ent_correct_pred_glod_num(sample_list, offset_map_list, 
@@ -409,14 +431,14 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
             avg_loss = total_loss / (batch_ind + 1)
             avg_sample_acc = total_sample_acc / (batch_ind + 1)
             
-            batch_print_format = "\rexp_name: {}, run_name: {}, epoch: {}/{}, batch: {}/{}, train_loss: {}, t_sample_acc: {}, lr: {}, batch_time: {}------------------------"
+            batch_print_format = "\rexp_name: {}, run_num: {}, epoch: {}/{}, batch: {}/{}, train_loss: {}, t_sample_acc: {}, lr: {}, batch_time: {}------------------------"
             print(batch_print_format.format(experiment_name, run_name, 
-                                ep + 1, num_epoch, 
-                                batch_ind + 1, len(dataloader), 
-                                avg_loss, 
-                                avg_sample_acc,
-                                optimizer.param_groups[0]['lr'],
-                                time.time() - t_batch), end="")
+                                            ep + 1, num_epoch, 
+                                            batch_ind + 1, len(dataloader), 
+                                            avg_loss, 
+                                            avg_sample_acc,
+                                            optimizer.param_groups[0]['lr'],
+                                            time.time() - t_batch), end="")
             
             if config["wandb"] is True and batch_ind % hyper_parameters["log_interval"] == 0:
                 logger.log({
@@ -486,7 +508,7 @@ elif hyper_parameters["scheduler"] == "Step":
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = decay_steps, gamma = decay_rate)
 
 
-# In[27]:
+# In[ ]:
 
 
 if not config["fr_scratch"]:
