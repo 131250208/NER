@@ -49,6 +49,7 @@ hyper_parameters = config["hyper_parameters"]
 
 # device
 os.environ["CUDA_VISIBLE_DEVICES"] = str(config["device_num"])
+print(torch.cuda.device_count(), "GPUs are available")
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # for reproductivity
 torch.manual_seed(hyper_parameters["seed"]) # pytorch random seed
@@ -83,9 +84,17 @@ else:
 max_seq_len = hyper_parameters["max_seq_len"]
 pred_max_seq_len = hyper_parameters["pred_max_seq_len"]
 batch_size = hyper_parameters["batch_size"]
+parallel = hyper_parameters["parallel"]
+if parallel:
+    print("Parallel training is set up!")
 epoch_num = hyper_parameters["epochs"]
 visual_field = hyper_parameters["visual_field"]
-model_path = config["bert_path"]
+encoder_path = hyper_parameters["bert_path"]
+use_last_k_layers_hiddens = hyper_parameters["use_last_k_layers_hiddens"]
+add_bilstm_on_the_top = hyper_parameters["add_bilstm_on_the_top"]
+bilstm_layers = hyper_parameters["bilstm_layers"]
+bilstm_dropout = hyper_parameters["bilstm_dropout"]
+bert_finetune = hyper_parameters["bert_finetune"]
 init_learning_rate = float(hyper_parameters["lr"])
 
 data_home = config["data_home"]
@@ -108,7 +117,7 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 # In[7]:
 
 
-tokenizer = BertTokenizerFast.from_pretrained(model_path, add_special_tokens = False, do_lower_case = False)
+tokenizer = BertTokenizerFast.from_pretrained(encoder_path, add_special_tokens = False, do_lower_case = False)
 def get_tok2char_span_map(text):
     tok2char_span = tokenizer.encode_plus(text, 
                                            return_offsets_mapping = True, 
@@ -313,7 +322,10 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 # In[21]:
 
 
-encoder = AutoModel.from_pretrained(model_path)
+encoder = AutoModel.from_pretrained(encoder_path)
+if not bert_finetune: # if train without finetuning bert
+    for param in encoder.parameters():
+        param.requires_grad = False
 
 
 # In[22]:
@@ -321,7 +333,9 @@ encoder = AutoModel.from_pretrained(model_path)
 
 fake_input = torch.zeros([batch_size, max_seq_len, encoder.config.hidden_size]).to(device)
 shaking_type = hyper_parameters["shaking_type"]
-ent_extractor = TPLinkerNER(encoder, len(tags), fake_input, shaking_type, visual_field)
+ent_extractor = TPLinkerNER(encoder, use_last_k_layers_hiddens, add_bilstm_on_the_top, bilstm_layers, bilstm_dropout, len(tags), fake_input, shaking_type, visual_field)
+if parallel:
+    ent_extractor = nn.DataParallel(ent_extractor)
 ent_extractor = ent_extractor.to(device)
 
 
@@ -409,14 +423,15 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
             avg_loss = total_loss / (batch_ind + 1)
             avg_sample_acc = total_sample_acc / (batch_ind + 1)
             
-            batch_print_format = "\rexp_name: {}, run_name: {}, epoch: {}/{}, batch: {}/{}, train_loss: {}, t_sample_acc: {}, lr: {}, batch_time: {}------------------------"
+            batch_print_format = "\rexp_name: {}, run_num: {}, epoch: {}/{}, batch: {}/{}, train_loss: {}, t_sample_acc: {}, lr: {}, batch_time: {}------------------------"
             print(batch_print_format.format(experiment_name, run_name, 
-                                ep + 1, num_epoch, 
-                                batch_ind + 1, len(dataloader), 
-                                avg_loss, 
-                                avg_sample_acc,
-                                optimizer.param_groups[0]['lr'],
-                                time.time() - t_batch), end="")
+                                            ep + 1, num_epoch, 
+                                            batch_ind + 1, len(dataloader), 
+                                            avg_loss, 
+                                            avg_sample_acc,
+                                            optimizer.param_groups[0]['lr'],
+                                            time.time() - t_batch), end="")
+            
             if config["wandb"] is True and batch_ind % hyper_parameters["log_interval"] == 0:
                 logger.log({
                     "train_loss": avg_loss,

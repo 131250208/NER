@@ -155,15 +155,27 @@ class DataMaker:
 
 class TPLinkerNER(nn.Module):
     def __init__(self, 
-             encoder, 
+             encoder,
+             use_last_k_layers_hiddens,
+             add_bilstm_on_the_top,
+             bilstm_layers,
+             bilstm_dropout,
              entity_type_num, 
              fake_input, 
              shaking_type, 
              visual_field):
         super().__init__()
         self.encoder = encoder
+        self.use_last_k_layers_hiddens = use_last_k_layers_hiddens
         shaking_hidden_size = encoder.config.hidden_size
-        
+        self.add_bilstm_on_the_top = add_bilstm_on_the_top
+        if add_bilstm_on_the_top:
+            self.bilstm = nn.LSTM(shaking_hidden_size, 
+                           shaking_hidden_size // 2, 
+                           num_layers = bilstm_layers, 
+                           dropout = bilstm_dropout,
+                           bidirectional = True, 
+                           batch_first = True)
         self.fc = nn.Linear(shaking_hidden_size, entity_type_num)
         
         # handshaking kernel
@@ -171,10 +183,12 @@ class TPLinkerNER(nn.Module):
         
     def forward(self, input_ids, attention_mask, token_type_ids):
         # input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
-#         set_trace()
         context_outputs = self.encoder(input_ids, attention_mask, token_type_ids)
         # last_hidden_state: (batch_size, seq_len, hidden_size)
-        last_hidden_state = context_outputs[0]
+        hidden_states = context_outputs[2]
+        last_hidden_state = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_hiddens:], dim = 0), dim = 0)
+        if self.add_bilstm_on_the_top:
+            last_hidden_state, _ = self.bilstm(last_hidden_state)
         
         # shaking_hiddens: (batch_size, shaking_seq_len, hidden_size)
         # shaking_seq_len: max_seq_len * vf - sum(1, vf)
