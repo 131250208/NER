@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 from bs4 import BeautifulSoup
@@ -32,7 +32,7 @@ import yaml
 
 # # Superparameter
 
-# In[2]:
+# In[ ]:
 
 
 try:
@@ -44,7 +44,7 @@ config = yaml.load(open("train_config.yaml", "r"), Loader = yaml.FullLoader)
 hyper_parameters = config["hyper_parameters"]
 
 
-# In[3]:
+# In[ ]:
 
 
 # device
@@ -55,7 +55,7 @@ torch.manual_seed(hyper_parameters["seed"]) # pytorch random seed
 torch.backends.cudnn.deterministic = True
 
 
-# In[4]:
+# In[ ]:
 
 
 experiment_name = config["experiment_name"]
@@ -77,35 +77,43 @@ else:
         os.makedirs(model_state_dict_dir)
 
 
-# In[5]:
+# In[ ]:
 
 
 data_home = config["data_home"]
-max_seq_len_t1 = hyper_parameters["max_seq_len"] # max sequence length of text 1
+
 meta_path = os.path.join(data_home, experiment_name, config["meta"])
 meta = json.load(open(meta_path, "r", encoding = "utf-8"))
+
+type2questions_path = os.path.join(data_home, experiment_name, config["type2questions"])
+type2questions = json.load(open(type2questions_path, "r", encoding = "utf-8"))
 tags = meta["tags"]
-type2questions = meta["type2questions"]
-pred_max_seq_len_t1 = hyper_parameters["pred_max_seq_len"]
+
 batch_size = hyper_parameters["batch_size"]
 epoch_num = hyper_parameters["epochs"]
 visual_field = hyper_parameters["visual_field"]
+
 encoder_path = config["bert_path"]
 tokenizer = BertTokenizerFast.from_pretrained(encoder_path, add_special_tokens = False, do_lower_case = False)
+
+max_seq_len_t1 = hyper_parameters["max_seq_len"] # max sequence length of text 1
+pred_max_seq_len_t1 = hyper_parameters["pred_max_seq_len"]
 max_seq_len_question = max([len(tokenizer.tokenize(q)) for questions in type2questions.values() for q in questions])
 max_seq_len = max_seq_len_t1 + max_seq_len_question + 1  # +1: [SEP]
 pred_max_seq_len = pred_max_seq_len_t1 + max_seq_len_question + 1
 assert max_seq_len <= 512 and pred_max_seq_len <= 512
 train_sliding_len = hyper_parameters["sliding_len"]
 pred_sliding_len = hyper_parameters["pred_sliding_len"]
+
 init_learning_rate = float(hyper_parameters["lr"])
+
 train_data_path = os.path.join(data_home, experiment_name, config["train_data"])
 valid_data_path = os.path.join(data_home, experiment_name, config["valid_data"])
 
 
 # # Load Data
 
-# In[6]:
+# In[ ]:
 
 
 train_data = json.load(open(train_data_path, "r", encoding = "utf-8"))
@@ -114,7 +122,7 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 
 # # Split
 
-# In[7]:
+# In[ ]:
 
 
 def get_tok2char_span_map(text):
@@ -129,36 +137,34 @@ tokenize = lambda text: tokenizer.tokenize(text)
 preprocessor = Preprocessor(tokenize, get_tok2char_span_map)
 
 
-# In[8]:
+# In[ ]:
 
 
-# split into short articles
-short_train_data = preprocessor.split_into_short_samples(train_data, 
-                                                          max_seq_len_t1, 
-                                                          sliding_len = train_sliding_len)
+def split(data, max_seq_len, sliding_len, data_type = "train"):
+    '''
+    split into short texts
+    '''
+    max_tok_num = 0
+    for sample in tqdm(data, "calculating the max token number of {} data".format(data_type)):
+        text = sample["text"]
+        tokens = tokenizer.tokenize(text)
+        max_tok_num = max(max_tok_num, len(tokens))
+    print("max token number of {} data: {}".format(data_type, max_tok_num))
+    
+    if max_tok_num > max_seq_len:
+        print("max token number of {} data is greater than the setting, need to split!".format(data_type))
+        short_data = preprocessor.split_into_short_samples(data, 
+                                          max_seq_len, 
+                                          sliding_len = sliding_len)
+    else:
+        short_data = data
+        print("max token number of {} data is less than the setting, no need to split!".format(data_type))
+    return short_data
+short_train_data = split(train_data, max_seq_len_t1, train_sliding_len, "train")
+short_valid_data = split(valid_data, pred_max_seq_len_t1, pred_sliding_len, "valid")
 
 
-# In[9]:
-
-
-max_tok_num_valid = 0
-for sample in tqdm(valid_data):
-    text = sample["text"]
-    tokens = tokenizer.tokenize(text)
-    max_tok_num_valid = max(max_tok_num_valid, len(tokens))
-max_tok_num_valid
-
-
-# In[10]:
-
-
-if max_tok_num_valid > pred_max_seq_len_t1:
-    short_valid_data = preprocessor.split_into_short_samples(valid_data, 
-                                                              pred_max_seq_len_t1, 
-                                                              sliding_len = pred_sliding_len)
-
-
-# In[11]:
+# In[ ]:
 
 
 # # check tok spans of new short article dict list
@@ -175,7 +181,7 @@ if max_tok_num_valid > pred_max_seq_len_t1:
 
 # # Tagging
 
-# In[12]:
+# In[ ]:
 
 
 if meta["visual_field_rec"] > visual_field:
@@ -183,7 +189,7 @@ if meta["visual_field_rec"] > visual_field:
     print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(visual_field))
 
 
-# In[13]:
+# In[ ]:
 
 
 def sample_equal_to(sample1, sample2):
@@ -201,14 +207,14 @@ def sample_equal_to(sample1, sample2):
     return True
 
 
-# In[14]:
+# In[ ]:
 
 
 handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len_t1, visual_field)
 handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len_t1, visual_field)
 
 
-# In[15]:
+# In[ ]:
 
 
 # # check tagging and decoding
@@ -256,14 +262,14 @@ handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len_t1, v
 
 # # Dataset
 
-# In[16]:
+# In[ ]:
 
 
 data_maker = DataMaker(handshaking_tagger, tokenizer)
 data_maker4valid = DataMaker(handshaking_tagger4valid, tokenizer)
 
 
-# In[17]:
+# In[ ]:
 
 
 class MyDataset(Dataset):
@@ -277,14 +283,14 @@ class MyDataset(Dataset):
         return len(self.data)
 
 
-# In[18]:
+# In[ ]:
 
 
 indexed_train_sample_list = data_maker.get_indexed_data(short_train_data, max_seq_len, type2questions)
 indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data, pred_max_seq_len, type2questions)
 
 
-# In[19]:
+# In[ ]:
 
 
 train_dataloader = DataLoader(MyDataset(indexed_train_sample_list), 
@@ -303,7 +309,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
                          )
 
 
-# In[20]:
+# In[ ]:
 
 
 # # have a look at dataloader
@@ -325,13 +331,13 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 
 # # Model
 
-# In[21]:
+# In[ ]:
 
 
 encoder = AutoModel.from_pretrained(encoder_path)
 
 
-# In[22]:
+# In[ ]:
 
 
 fake_input = torch.zeros([batch_size, max_seq_len, encoder.config.hidden_size]).to(device)
@@ -340,7 +346,7 @@ ent_extractor = MRCTPLinkerNER(encoder, fake_input, shaking_type, visual_field)
 ent_extractor = ent_extractor.to(device)
 
 
-# In[23]:
+# In[ ]:
 
 
 metrics = Metrics(handshaking_tagger)
@@ -354,7 +360,7 @@ def bias_loss(weights = None):
 loss_func = bias_loss()
 
 
-# In[24]:
+# In[ ]:
 
 
 # train step
@@ -411,7 +417,7 @@ def valid_step(valid_data):
     return sample_acc.item(), correct_num, pred_num, gold_num
 
 
-# In[25]:
+# In[ ]:
 
 
 max_f1 = 0.
@@ -491,7 +497,7 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
         print("Current valid_f1: {}, Best f1: {}".format(valid_f1, max_f1))
 
 
-# In[26]:
+# In[ ]:
 
 
 # optimizer 

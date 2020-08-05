@@ -187,13 +187,13 @@ class Preprocessor:
                             new_term["char_span"][1] -= char_span[0]
                             sub_entity_list.append(new_term)
 
-                    if len(sub_entity_list) > 0:
-                        new_sample = {
-                            "id": medline_id,
-                            "text": sub_text,
-                            "entity_list": sub_entity_list,
-                        }
-                        new_sample_list.append(new_sample)
+#                     if len(sub_entity_list) > 0:
+                    new_sample = {
+                        "id": medline_id,
+                        "text": sub_text,
+                        "entity_list": sub_entity_list,
+                    }
+                    new_sample_list.append(new_sample)
 
                 if end_ind > len(tokens):
                     break

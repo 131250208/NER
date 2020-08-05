@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 from bs4 import BeautifulSoup
@@ -32,7 +32,7 @@ import yaml
 
 # # Superparameter
 
-# In[2]:
+# In[ ]:
 
 
 try:
@@ -44,7 +44,7 @@ config = yaml.load(open("train_config.yaml", "r"), Loader = yaml.FullLoader)
 hyper_parameters = config["hyper_parameters"]
 
 
-# In[3]:
+# In[ ]:
 
 
 # device
@@ -56,7 +56,7 @@ torch.manual_seed(hyper_parameters["seed"]) # pytorch random seed
 torch.backends.cudnn.deterministic = True
 
 
-# In[4]:
+# In[ ]:
 
 
 experiment_name = config["experiment_name"]
@@ -78,11 +78,14 @@ else:
         os.makedirs(model_state_dict_dir)
 
 
-# In[5]:
+# In[ ]:
 
 
 max_seq_len = hyper_parameters["max_seq_len"]
 pred_max_seq_len = hyper_parameters["pred_max_seq_len"]
+sliding_len = hyper_parameters["sliding_len"]
+pred_sliding_len = hyper_parameters["pred_sliding_len"]
+
 batch_size = hyper_parameters["batch_size"]
 parallel = hyper_parameters["parallel"]
 if parallel:
@@ -105,7 +108,7 @@ meta_path = os.path.join(data_home, experiment_name, config["meta"])
 
 # # Load Data
 
-# In[6]:
+# In[ ]:
 
 
 train_data = json.load(open(train_data_path, "r", encoding = "utf-8"))
@@ -114,7 +117,7 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 
 # # Split
 
-# In[7]:
+# In[ ]:
 
 
 tokenizer = BertTokenizerFast.from_pretrained(encoder_path, add_special_tokens = False, do_lower_case = False)
@@ -130,36 +133,34 @@ tokenize = lambda text: tokenizer.tokenize(text)
 preprocessor = Preprocessor(tokenize, get_tok2char_span_map)
 
 
-# In[8]:
+# In[ ]:
 
 
-# split into short articles
-short_train_data = preprocessor.split_into_short_samples(train_data, 
-                                                          max_seq_len, 
-                                                          sliding_len = hyper_parameters["sliding_len"])
+def split(data, max_seq_len, sliding_len, data_type = "train"):
+    '''
+    split into short texts
+    '''
+    max_tok_num = 0
+    for sample in tqdm(data, "calculating the max token number of {} data".format(data_type)):
+        text = sample["text"]
+        tokens = tokenizer.tokenize(text)
+        max_tok_num = max(max_tok_num, len(tokens))
+    print("max token number of {} data: {}".format(data_type, max_tok_num))
+    
+    if max_tok_num > max_seq_len:
+        print("max token number of {} data is greater than the setting, need to split!".format(data_type))
+        short_data = preprocessor.split_into_short_samples(data, 
+                                          max_seq_len, 
+                                          sliding_len = sliding_len)
+    else:
+        short_data = data
+        print("max token number of {} data is less than the setting, no need to split!".format(data_type))
+    return short_data
+short_train_data = split(train_data, max_seq_len, sliding_len, "train")
+short_valid_data = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid")
 
 
-# In[9]:
-
-
-max_tok_num_valid = 0
-for sample in tqdm(valid_data):
-    text = sample["text"]
-    tokens = tokenizer.tokenize(text)
-    max_tok_num_valid = max(max_tok_num_valid, len(tokens))
-max_tok_num_valid
-
-
-# In[10]:
-
-
-if max_tok_num_valid > pred_max_seq_len:
-    short_valid_data = preprocessor.split_into_short_samples(valid_data, 
-                                                              pred_max_seq_len, 
-                                                              sliding_len = hyper_parameters["sliding_len"])
-
-
-# In[11]:
+# In[ ]:
 
 
 # # check tok spans of new short article dict list
@@ -167,7 +168,7 @@ if max_tok_num_valid > pred_max_seq_len:
 #     text = art_dict["text"]
 #     tok2char_span = get_tok2char_span_map(text)
 #     for term in art_dict["entity_list"]:        
-#         # # voc 里必须加两个token：hypo, mineralo
+#         # # bert-base-cased 的voc 里必须加两个token：hypo, mineralo
 #         tok_span = term["tok_span"]
 #         char_span_list = tok2char_span[tok_span[0]:tok_span[1]]
 #         pred_text = text[char_span_list[0][0]:char_span_list[-1][1]]
@@ -176,7 +177,7 @@ if max_tok_num_valid > pred_max_seq_len:
 
 # # Tagging
 
-# In[12]:
+# In[ ]:
 
 
 meta = json.load(open(meta_path, "r", encoding = "utf-8"))
@@ -186,7 +187,7 @@ if meta["visual_field_rec"] > visual_field:
     print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(visual_field))
 
 
-# In[13]:
+# In[ ]:
 
 
 def sample_equal_to(sample1, sample2):
@@ -204,58 +205,60 @@ def sample_equal_to(sample1, sample2):
     return True
 
 
-# In[14]:
+# In[ ]:
 
 
 handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len, visual_field)
+handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, visual_field)
 
 
-# In[15]:
+# In[ ]:
 
 
 # # check tagging and decoding
-# data4check = short_train_data + short_valid_data
-# for idx in tqdm(range(0, len(data4check), batch_size)):
-#     batch_matrix_spots = []
-#     batch_data = data4check[idx:idx + batch_size]
-#     for sample in batch_data:
-#         matrix_spots = handshaking_tagger.get_spots(sample)
-# #         %timeit shaking_tagger.get_spots(sample)
-#         batch_matrix_spots.append(matrix_spots)
-    
-#     # tagging
-#     # batch_shaking_tag: (batch_size, shaking_tag, tag_size)
-#     batch_shaking_tag = handshaking_tagger.spots2shaking_tag4batch(batch_matrix_spots)
-# #     %timeit shaking_tagger.spots2shaking_tag4batch(batch_matrix_spots) #0.3s
-    
-#     for batch_idx in range(len(batch_data)):
-#         gold_sample = batch_data[batch_idx]
-#         shaking_tag = batch_shaking_tag[batch_idx]
-#         # decode
-#         text = gold_sample["text"]
-#         tok2char_span = get_tok2char_span_map(text)
-#         ent_list = handshaking_tagger.decode_ent(text, shaking_tag, tok2char_span)
-#         pred_sample = {
-#             "text": text,
-#             "id": gold_sample["id"],
-#             "entity_list": ent_list,
-#         }
-        
-#         if not sample_equal_to(pred_sample, gold_sample) or not sample_equal_to(gold_sample, pred_sample):
-#             set_trace()
+# def check_tagging_decoding(data4check, handshaking_tagger):
+#     for idx in tqdm(range(0, len(data4check), batch_size)):
+#         batch_matrix_spots = []
+#         batch_data = data4check[idx:idx + batch_size]
+#         for sample in batch_data:
+#             matrix_spots = handshaking_tagger.get_spots(sample)
+#     #         %timeit shaking_tagger.get_spots(sample)
+#             batch_matrix_spots.append(matrix_spots)
+
+#         # tagging
+#         # batch_shaking_tag: (batch_size, shaking_tag, tag_size)
+#         batch_shaking_tag = handshaking_tagger.spots2shaking_tag4batch(batch_matrix_spots)
+#     #     %timeit shaking_tagger.spots2shaking_tag4batch(batch_matrix_spots) #0.3s
+
+#         for batch_idx in range(len(batch_data)):
+#             gold_sample = batch_data[batch_idx]
+#             shaking_tag = batch_shaking_tag[batch_idx]
+#             # decode
+#             text = gold_sample["text"]
+#             tok2char_span = get_tok2char_span_map(text)
+#             ent_list = handshaking_tagger.decode_ent(text, shaking_tag, tok2char_span)
+#             pred_sample = {
+#                 "text": text,
+#                 "id": gold_sample["id"],
+#                 "entity_list": ent_list,
+#             }
+
+#             if not sample_equal_to(pred_sample, gold_sample) or not sample_equal_to(gold_sample, pred_sample):
+#                 set_trace()
+# check_tagging_decoding(short_train_data, handshaking_tagger)
+# check_tagging_decoding(short_valid_data, handshaking_tagger4valid)
 
 
 # # Dataset
 
-# In[16]:
+# In[ ]:
 
 
 data_maker = DataMaker(handshaking_tagger, tokenizer)
-handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, visual_field)
 data_maker4valid = DataMaker(handshaking_tagger4valid, tokenizer)
 
 
-# In[17]:
+# In[ ]:
 
 
 class MyDataset(Dataset):
@@ -269,14 +272,14 @@ class MyDataset(Dataset):
         return len(self.data)
 
 
-# In[18]:
+# In[ ]:
 
 
 indexed_train_sample_list = data_maker.get_indexed_data(short_train_data, max_seq_len)
 indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data, pred_max_seq_len)
 
 
-# In[19]:
+# In[ ]:
 
 
 train_dataloader = DataLoader(MyDataset(indexed_train_sample_list), 
@@ -295,7 +298,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
                          )
 
 
-# In[20]:
+# In[ ]:
 
 
 # # have a look at dataloader
@@ -319,7 +322,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 
 # # Model
 
-# In[21]:
+# In[ ]:
 
 
 encoder = AutoModel.from_pretrained(encoder_path)
@@ -328,7 +331,7 @@ if not bert_finetune: # if train without finetuning bert
         param.requires_grad = False
 
 
-# In[22]:
+# In[ ]:
 
 
 fake_input = torch.zeros([batch_size, max_seq_len, encoder.config.hidden_size]).to(device)
@@ -339,14 +342,14 @@ if parallel:
 ent_extractor = ent_extractor.to(device)
 
 
-# In[23]:
+# In[ ]:
 
 
 metrics = Metrics(handshaking_tagger)
 metrics4valid = Metrics(handshaking_tagger4valid)
 
 
-# In[24]:
+# In[ ]:
 
 
 # train step
@@ -403,7 +406,7 @@ def valid_step(valid_data):
     return sample_acc.item(), correct_num, pred_num, gold_num
 
 
-# In[25]:
+# In[ ]:
 
 
 max_f1 = 0.
@@ -483,7 +486,7 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
         print("Current valid_f1: {}, Best f1: {}".format(valid_f1, max_f1))
 
 
-# In[26]:
+# In[ ]:
 
 
 # optimizer 
@@ -500,7 +503,7 @@ elif hyper_parameters["scheduler"] == "Step":
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = decay_steps, gamma = decay_rate)
 
 
-# In[27]:
+# In[ ]:
 
 
 if not config["fr_scratch"]:
