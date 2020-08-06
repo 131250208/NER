@@ -114,6 +114,7 @@ class DataMaker:
             for type_, questions in type2questions.items():
                 for question in questions:
                     # codes for bert input
+                    question = "Find {} in the text, {}".format(type_, question)
                     text_n_question = "{}[SEP]{}".format(text, question)
                     codes = self.tokenizer.encode_plus(text_n_question, 
                                             return_offsets_mapping = True, 
@@ -131,11 +132,11 @@ class DataMaker:
                     # spots
                     matrix_spots = type2spots[type_]
                     
-                    new_sample = copy.deepcopy(sample)
-                    new_sample["entity_list"] = [ent for ent in sample["entity_list"] if ent["type"] == type_]
-                    new_sample["question"] = question
+                    sub_sample = copy.deepcopy(sample)
+                    sub_sample["entity_list"] = [ent for ent in sample["entity_list"] if ent["type"] == type_]
+                    sub_sample["question"] = question
                     
-                    sample_tp = (new_sample,
+                    sample_tp = (sub_sample,
                              input_ids,
                              attention_mask,
                              token_type_ids,

@@ -2,6 +2,7 @@ from IPython.core.debugger import set_trace
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
+import time
 
 class HandshakingKernel(nn.Module):
     def __init__(self, visual_field, fake_inputs, shaking_type):
@@ -10,16 +11,25 @@ class HandshakingKernel(nn.Module):
         
         self.shaking_type = shaking_type
         self.visual_field = visual_field
+        
         if shaking_type == "cln":
             self.cond_layer_norm = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
         elif shaking_type == "cln_plus":
+            self.lamtha = Parameter(torch.rand(hidden_size))
             self.tok_pair_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
-            self.full_hiddens_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.context_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
         elif shaking_type == "cat":
             self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
         elif shaking_type == "res_gate":
             self.Wg = nn.Linear(hidden_size, hidden_size)
             self.Wo = nn.Linear(hidden_size * 3, hidden_size)
+    
+    def mix_pooling(self, seq_hiddens):
+        # seq_hiddens: (batch_size, seq_len, hidden_size)
+        max_pooling, _ = torch.max(seq_hiddens, dim = -2)
+        mean_pooling = torch.mean(seq_hiddens, dim = -2)
+        mix_pooling = self.lamtha * mean_pooling + (1 - self.lamtha) * max_pooling
+        return mix_pooling
         
     def forward(self, seq_hiddens):
         '''
@@ -32,29 +42,41 @@ class HandshakingKernel(nn.Module):
         '''
         seq_len = seq_hiddens.size()[-2]
         shaking_hiddens_list = []
-        for ind in range(seq_len):            
-            hidden_each_step = seq_hiddens[:, ind, :]
-            # seq_len - ind: only shake afterwards
-            repeat_len = min(seq_len - ind, self.visual_field)
-            repeat_hiddens = hidden_each_step[:, None, :].repeat(1, repeat_len, 1)  
-            after_hiddens = seq_hiddens[:, ind:ind + self.visual_field, :]
+        padding_context = torch.zeros_like(seq_hiddens[:, 0,:])
+        
+        for start_idx in range(seq_len):            
+            hidden_each_step = seq_hiddens[:, start_idx, :]
+            # seq_len - start_idx: only shake afterwards
+            repeat_len = min(seq_len - start_idx, self.visual_field)
+            repeat_current_hiddens = hidden_each_step[:, None, :].repeat(1, repeat_len, 1)  
+            visual_hiddens = seq_hiddens[:, start_idx:start_idx + self.visual_field, :]
             # full_hiddens4entity
-            full_ent_hiddens_mean = torch.stack([torch.mean(after_hiddens[:, :i+1, :], dim = 1) for i in range(repeat_len)], dim = 1)
+#             context = torch.stack([self.mix_pooling(visual_hiddens[:, :i+1, :]) for i in range(visual_hiddens.size()[1])], dim = 1)
+            
+            context_list = []
+            for i in range(visual_hiddens.size()[1]):
+                end_idx = start_idx + i
+                ent_context = self.mix_pooling(seq_hiddens[:, start_idx:end_idx + 1, :])
+                bf_context = self.mix_pooling(seq_hiddens[:, :start_idx, :]) if start_idx != 0 else padding_context
+                af_context = self.mix_pooling(seq_hiddens[:, end_idx + 1:, :]) if end_idx + 1 != seq_hiddens.size()[-2] else padding_context
+                context_list.append((ent_context + bf_context + af_context) / 3)
+            context = torch.stack(context_list, dim = 1)
+            
 #             set_trace()
             if self.shaking_type == "cln":
-                shaking_hiddens = self.cond_layer_norm(after_hiddens, repeat_hiddens)
+                shaking_hiddens = self.cond_layer_norm(visual_hiddens, repeat_current_hiddens)
             elif self.shaking_type == "full_hiddens":
                 shaking_hiddens = full_ent_hiddens_mean
             elif self.shaking_type == "cln_plus":
-                shaking_hiddens = self.tok_pair_cln(after_hiddens, repeat_hiddens)
-                shaking_hiddens = self.full_hiddens_cln(shaking_hiddens, full_ent_hiddens_mean)
+                shaking_hiddens = self.tok_pair_cln(visual_hiddens, repeat_current_hiddens)
+                shaking_hiddens = self.context_cln(shaking_hiddens, context)
             elif self.shaking_type == "cat":
-                shaking_hiddens = torch.cat([repeat_hiddens, after_hiddens], dim = -1)
+                shaking_hiddens = torch.cat([repeat_current_hiddens, visual_hiddens], dim = -1)
                 shaking_hiddens = torch.tanh(self.combine_fc(shaking_hiddens))
             elif self.shaking_type == "res_gate":
-                gate = torch.sigmoid(self.Wg(repeat_hiddens))
-                cond_hiddens = after_hiddens * gate
-                res_hiddens = torch.cat([repeat_hiddens, after_hiddens, cond_hiddens], dim = -1)
+                gate = torch.sigmoid(self.Wg(repeat_current_hiddens))
+                cond_hiddens = visual_hiddens * gate
+                res_hiddens = torch.cat([repeat_current_hiddens, visual_hiddens, cond_hiddens], dim = -1)
                 shaking_hiddens = torch.tanh(self.Wo(res_hiddens)) 
             shaking_hiddens_list.append(shaking_hiddens)
         long_shaking_hiddens = torch.cat(shaking_hiddens_list, dim = 1)
@@ -125,9 +147,9 @@ class LayerNorm(nn.Module):
             
             # cond在加入beta和gamma之前做一次变换，保证维度一致
             if self.center:
-                beta = self.beta_dense(cond) + self.beta
+                beta = torch.sigmoid(self.beta_dense(cond)) + self.beta
             if self.scale:
-                gamma = self.gamma_dense(cond) + self.gamma
+                gamma = torch.sigmoid(self.gamma_dense(cond)) + self.gamma
         else:
             if self.center:
                 beta = self.beta
