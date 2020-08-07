@@ -90,6 +90,9 @@ type2questions = json.load(open(type2questions_path, "r", encoding = "utf-8"))
 tags = meta["tags"]
 
 batch_size = hyper_parameters["batch_size"]
+parallel = hyper_parameters["parallel"]
+if parallel:
+    print("Parallel training is set up!")
 epoch_num = hyper_parameters["epochs"]
 visual_field = hyper_parameters["visual_field"]
 
@@ -348,6 +351,8 @@ ent_extractor = MRCTPLinkerNER(encoder,
                                shaking_type,
                                pooling_type,
                                visual_field)
+if parallel:
+    ent_extractor = nn.DataParallel(ent_extractor)
 ent_extractor = ent_extractor.to(device)
 
 
