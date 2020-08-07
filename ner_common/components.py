@@ -35,7 +35,7 @@ class HandshakingKernel(nn.Module):
         elif pooling_type == "max":
             pooling, _ = torch.max(seq_hiddens, dim = -2)
         elif pooling_type == "mix":
-            pooling = self.lamtha * torch.mean(seq_hiddens, dim = -2) + (1 - self.lamtha) * torch.max(seq_hiddens, dim = -2)
+            pooling = self.lamtha * torch.mean(seq_hiddens, dim = -2) + (1 - self.lamtha) * torch.max(seq_hiddens, dim = -2)[0]
         return pooling
         
     def forward(self, seq_hiddens):
@@ -72,7 +72,7 @@ class HandshakingKernel(nn.Module):
 #             set_trace()
             if self.shaking_type == "cln":
                 shaking_hiddens = self.cond_layer_norm(visual_hiddens, repeat_current_hiddens)
-            elif self.shaking_type == "context_bt_tp":
+            elif self.shaking_type == "pooling":
                 shaking_hiddens = context
             elif self.shaking_type == "cln_plus":
                 shaking_hiddens = self.tok_pair_cln(visual_hiddens, repeat_current_hiddens)
