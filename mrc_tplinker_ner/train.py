@@ -342,7 +342,12 @@ encoder = AutoModel.from_pretrained(encoder_path)
 
 fake_input = torch.zeros([batch_size, max_seq_len, encoder.config.hidden_size]).to(device)
 shaking_type = hyper_parameters["shaking_type"]
-ent_extractor = MRCTPLinkerNER(encoder, fake_input, shaking_type, visual_field)
+pooling_type = hyper_parameters["pooling_type"]
+ent_extractor = MRCTPLinkerNER(encoder, 
+                               fake_input, 
+                               shaking_type,
+                               pooling_type,
+                               visual_field)
 ent_extractor = ent_extractor.to(device)
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 from bs4 import BeautifulSoup
@@ -32,7 +32,7 @@ import yaml
 
 # # Superparameter
 
-# In[ ]:
+# In[2]:
 
 
 try:
@@ -44,7 +44,7 @@ config = yaml.load(open("train_config.yaml", "r"), Loader = yaml.FullLoader)
 hyper_parameters = config["hyper_parameters"]
 
 
-# In[ ]:
+# In[3]:
 
 
 # device
@@ -56,7 +56,7 @@ torch.manual_seed(hyper_parameters["seed"]) # pytorch random seed
 torch.backends.cudnn.deterministic = True
 
 
-# In[ ]:
+# In[4]:
 
 
 experiment_name = config["experiment_name"]
@@ -78,7 +78,7 @@ else:
         os.makedirs(model_state_dict_dir)
 
 
-# In[ ]:
+# In[5]:
 
 
 max_seq_len = hyper_parameters["max_seq_len"]
@@ -108,7 +108,7 @@ meta_path = os.path.join(data_home, experiment_name, config["meta"])
 
 # # Load Data
 
-# In[ ]:
+# In[6]:
 
 
 train_data = json.load(open(train_data_path, "r", encoding = "utf-8"))
@@ -117,7 +117,7 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 
 # # Split
 
-# In[ ]:
+# In[7]:
 
 
 tokenizer = BertTokenizerFast.from_pretrained(encoder_path, add_special_tokens = False, do_lower_case = False)
@@ -133,7 +133,7 @@ tokenize = lambda text: tokenizer.tokenize(text)
 preprocessor = Preprocessor(tokenize, get_tok2char_span_map)
 
 
-# In[ ]:
+# In[8]:
 
 
 def split(data, max_seq_len, sliding_len, data_type = "train"):
@@ -160,7 +160,7 @@ short_train_data = split(train_data, max_seq_len, sliding_len, "train")
 short_valid_data = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid")
 
 
-# In[ ]:
+# In[9]:
 
 
 # # check tok spans of new short article dict list
@@ -177,7 +177,7 @@ short_valid_data = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid"
 
 # # Tagging
 
-# In[ ]:
+# In[10]:
 
 
 meta = json.load(open(meta_path, "r", encoding = "utf-8"))
@@ -187,7 +187,7 @@ if meta["visual_field_rec"] > visual_field:
     print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(visual_field))
 
 
-# In[ ]:
+# In[11]:
 
 
 def sample_equal_to(sample1, sample2):
@@ -205,14 +205,14 @@ def sample_equal_to(sample1, sample2):
     return True
 
 
-# In[ ]:
+# In[12]:
 
 
 handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len, visual_field)
 handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, visual_field)
 
 
-# In[ ]:
+# In[13]:
 
 
 # # check tagging and decoding
@@ -251,14 +251,14 @@ handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, visu
 
 # # Dataset
 
-# In[ ]:
+# In[14]:
 
 
 data_maker = DataMaker(handshaking_tagger, tokenizer)
 data_maker4valid = DataMaker(handshaking_tagger4valid, tokenizer)
 
 
-# In[ ]:
+# In[15]:
 
 
 class MyDataset(Dataset):
@@ -272,14 +272,14 @@ class MyDataset(Dataset):
         return len(self.data)
 
 
-# In[ ]:
+# In[16]:
 
 
 indexed_train_sample_list = data_maker.get_indexed_data(short_train_data, max_seq_len)
 indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data, pred_max_seq_len)
 
 
-# In[ ]:
+# In[17]:
 
 
 train_dataloader = DataLoader(MyDataset(indexed_train_sample_list), 
@@ -298,7 +298,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
                          )
 
 
-# In[ ]:
+# In[18]:
 
 
 # # have a look at dataloader
@@ -322,7 +322,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 
 # # Model
 
-# In[ ]:
+# In[19]:
 
 
 encoder = AutoModel.from_pretrained(encoder_path)
@@ -331,25 +331,35 @@ if not bert_finetune: # if train without finetuning bert
         param.requires_grad = False
 
 
-# In[ ]:
+# In[20]:
 
 
 fake_input = torch.zeros([batch_size, max_seq_len, encoder.config.hidden_size]).to(device)
 shaking_type = hyper_parameters["shaking_type"]
-ent_extractor = TPLinkerNER(encoder, use_last_k_layers_hiddens, add_bilstm_on_the_top, bilstm_layers, bilstm_dropout, len(tags), fake_input, shaking_type, visual_field)
+pooling_type = hyper_parameters["pooling_type"]
+ent_extractor = TPLinkerNER(encoder, 
+                            use_last_k_layers_hiddens, 
+                            add_bilstm_on_the_top, 
+                            bilstm_layers, bilstm_dropout, 
+                            len(tags), 
+                            fake_input, 
+                            shaking_type, 
+                            pooling_type,
+                            visual_field
+                            )
 if parallel:
     ent_extractor = nn.DataParallel(ent_extractor)
 ent_extractor = ent_extractor.to(device)
 
 
-# In[ ]:
+# In[21]:
 
 
 metrics = Metrics(handshaking_tagger)
 metrics4valid = Metrics(handshaking_tagger4valid)
 
 
-# In[ ]:
+# In[22]:
 
 
 # train step
@@ -406,7 +416,7 @@ def valid_step(valid_data):
     return sample_acc.item(), correct_num, pred_num, gold_num
 
 
-# In[ ]:
+# In[23]:
 
 
 max_f1 = 0.
@@ -486,7 +496,7 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
         print("Current valid_f1: {}, Best f1: {}".format(valid_f1, max_f1))
 
 
-# In[ ]:
+# In[24]:
 
 
 # optimizer 
@@ -503,7 +513,7 @@ elif hyper_parameters["scheduler"] == "Step":
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size = decay_steps, gamma = decay_rate)
 
 
-# In[ ]:
+# In[25]:
 
 
 if not config["fr_scratch"]:

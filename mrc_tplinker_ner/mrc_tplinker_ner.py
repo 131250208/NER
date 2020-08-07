@@ -179,7 +179,8 @@ class MRCTPLinkerNER(nn.Module):
     def __init__(self, 
              encoder,
              fake_input, 
-             shaking_type, 
+             shaking_type,
+             pooling_type,
              visual_field):
         super().__init__()
         self.encoder = encoder
@@ -188,7 +189,7 @@ class MRCTPLinkerNER(nn.Module):
         self.fc = nn.Linear(shaking_hidden_size, 2)
         
         # handshaking kernel
-        self.handshaking_kernel = HandshakingKernel(visual_field, fake_input, shaking_type)
+        self.handshaking_kernel = HandshakingKernel(visual_field, fake_input, shaking_type, pooling_type)
         
     def forward(self, input_ids, attention_mask, token_type_ids, max_seq_len_t1):
         '''
