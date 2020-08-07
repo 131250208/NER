@@ -46,7 +46,7 @@ hyper_parameters = config["hyper_parameters"]
 
 # In[3]:
 
-
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 # device
 os.environ["CUDA_VISIBLE_DEVICES"] = str(config["device_num"])
 print(torch.cuda.device_count(), "GPUs are available")
