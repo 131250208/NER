@@ -217,7 +217,8 @@ class Metrics:
         
         min_, max_ = torch.min(gradient_norm), torch.max(gradient_norm)
         gradient_norm = (gradient_norm - min_) / (max_ - min_)
-
+        gradient_norm = torch.clamp(gradient_norm, 0, 0.9999999) # ensure elements in gradient_norm != 1.
+        
         example_sum = torch.flatten(gradient_norm).size()[0] # N
 
         # calculate weights
@@ -242,7 +243,7 @@ class Metrics:
         print("ema current_weights: {}".format(current_weights))
         
         # weights4examples: pick weights for all examples
-        weight_pk_idx = ((gradient_norm - 0.001) / (1 / bins)).long()[:, :, None] # - 0.001: ensure elements in gradient_norm < 1.
+        weight_pk_idx = (gradient_norm / (1 / bins)).long()[:, :, None]
         weights_rp = current_weights[None, None, :].repeat(gradient_norm.size()[0], gradient_norm.size()[1], 1)
         weights4examples = torch.gather(weights_rp, -1, weight_pk_idx).squeeze(-1)
         weights4examples /= torch.sum(weights4examples)
@@ -264,7 +265,7 @@ class Metrics:
         y_pred_pos = torch.cat([y_pred_pos, zeros], dim = -1)
         neg_loss = torch.logsumexp(y_pred_neg, dim = -1) 
         pos_loss = torch.logsumexp(y_pred_pos, dim = -1) 
-        return (self.GHM(neg_loss + pos_loss, bins = 100)).sum() 
+        return (self.GHM(neg_loss + pos_loss, bins = 1000)).sum() 
     
     def loss_func(self, y_pred, y_true):
         return self._multilabel_categorical_crossentropy(y_pred, y_true)
