@@ -233,14 +233,14 @@ class Metrics:
             hits_vec[i] = hits.item()
             current_weights[i] = example_sum / bins / (hits.item() + example_sum / bins )
         # EMA: exponential moving averaging
-        print()
-        print("hits_vec: {}".format(hits_vec))
-        print("current_weights: {}".format(current_weights))
+#         print()
+#         print("hits_vec: {}".format(hits_vec))
+#         print("current_weights: {}".format(current_weights))
         if self.last_weights is None:
             self.last_weights = torch.ones(bins).to(gradient.device) # init by ones
         current_weights = self.last_weights * beta + (1 - beta) * current_weights
         self.last_weights = current_weights
-        print("ema current_weights: {}".format(current_weights))
+#         print("ema current_weights: {}".format(current_weights))
         
         # weights4examples: pick weights for all examples
         weight_pk_idx = (gradient_norm / (1 / bins)).long()[:, :, None]
