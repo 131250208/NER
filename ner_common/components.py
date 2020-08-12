@@ -4,22 +4,61 @@ import torch.nn as nn
 from torch.nn.parameter import Parameter
 import time
 
+class CLNGRU(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.reset_cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
+        self.update_cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
+        self.input_cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
+        
+    def forward(self, sequence):
+        # sequence: (batch_size, sequence_len, hidden_size)
+        hidden = torch.zeros_like(sequence[:, 0, :])
+        hiddens = []
+        for i in range(sequence.size()[1]):
+            current_input = sequence[:, i, :]
+            reset_gate = torch.sigmoid(self.reset_cln(current_input, hidden))
+            update_gate = torch.sigmoid(self.update_cln(current_input, hidden))
+            hidden_candidate = torch.tanh(self.input_cln(current_input, reset_gate * hidden))
+            hidden = hidden_candidate * update_gate + (1 - update_gate) * hidden
+            hiddens.append(hidden)
+        return torch.stack(hiddens, dim = 1), hidden
+
+class CLNRNN(nn.Module):
+    def __init__(self, hidden_size):
+        super().__init__()
+        self.cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
+        
+    def forward(self, sequence):
+        # sequence: (batch_size, sequence_len, hidden_size)
+        hidden = torch.zeros_like(sequence[:, 0, :])
+        hiddens = []
+        for i in range(sequence.size()[1]):
+            current_input = sequence[:, i, :]
+            hidden = self.cln(current_input, hidden)
+            hiddens.append(hidden)
+        return torch.stack(hiddens, dim = 1), hidden
+    
 class HandshakingKernel(nn.Module):
-    def __init__(self, visual_field, fake_inputs, shaking_type, pooling_type):
+    def __init__(self, visual_field, fake_inputs, shaking_type, context_type):
         super().__init__()
         hidden_size = fake_inputs.size()[-1]
         
         self.shaking_type = shaking_type
         self.visual_field = visual_field
-        self.pooling_type = pooling_type
-        if pooling_type == "mix":
-            self.lamtha = Parameter(torch.rand(hidden_size))
+        self.context_type = context_type
             
         if shaking_type == "cln":
             self.cond_layer_norm = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
         elif shaking_type == "cln_plus":
             self.tok_pair_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
             self.context_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+        elif shaking_type == "cln_plus2":
+            self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
+            self.cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+        elif shaking_type == "cln_plus3":
+            self.cln_start_tok = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.cln_end_tok = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
         elif shaking_type == "cat":
             self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
         elif shaking_type == "cat_plus":
@@ -27,16 +66,40 @@ class HandshakingKernel(nn.Module):
         elif shaking_type == "res_gate":
             self.Wg = nn.Linear(hidden_size, hidden_size)
             self.Wo = nn.Linear(hidden_size * 3, hidden_size)
+            
+        if context_type == "mix_pooling":
+            self.lamtha = Parameter(torch.rand(hidden_size))
+        elif context_type == "lstm":
+            self.context_lstm = nn.LSTM(hidden_size, 
+                           hidden_size, 
+                           num_layers = 1, 
+                           bidirectional = False, 
+                           batch_first = True)
+        elif context_type == "clngru":
+            self.clngru = CLNGRU(hidden_size)
+        elif context_type == "clnrnn":
+            self.clnrnn = CLNRNN(hidden_size)
     
-    def pooling(self, seq_hiddens, pooling_type = "mean"):
+    def get_context_hiddens(self, seq_hiddens, context_type = "mean_pooling"):
         # seq_hiddens: (batch_size, seq_len, hidden_size)
-        if pooling_type == "mean":
-            pooling = torch.mean(seq_hiddens, dim = -2)
-        elif pooling_type == "max":
-            pooling, _ = torch.max(seq_hiddens, dim = -2)
-        elif pooling_type == "mix":
-            pooling = self.lamtha * torch.mean(seq_hiddens, dim = -2) + (1 - self.lamtha) * torch.max(seq_hiddens, dim = -2)[0]
-        return pooling
+        def pool(seqence, pooling_type):
+            if pooling_type == "mean_pooling":
+                pooling = torch.mean(seqence, dim = -2)
+            elif pooling_type == "max_pooling":
+                pooling, _ = torch.max(seqence, dim = -2)
+            elif pooling_type == "mix_pooling":
+                pooling = self.lamtha * torch.mean(seqence, dim = -2) + (1 - self.lamtha) * torch.max(seqence, dim = -2)[0]
+            return pooling
+        if "pooling" in context_type:
+            context = torch.stack([pool(seq_hiddens[:, :i+1, :], context_type) for i in range(seq_hiddens.size()[1])], dim = 1)
+        elif context_type == "lstm":
+            context, _ = self.context_lstm(seq_hiddens)
+        elif context_type == "clngru":
+            context, _ = self.clngru(seq_hiddens)
+        elif context_type == "clnrnn":
+            context, _ = self.clnrnn(seq_hiddens)
+            
+        return context
         
     def forward(self, seq_hiddens):
         '''
@@ -57,15 +120,15 @@ class HandshakingKernel(nn.Module):
             repeat_len = min(seq_len - start_idx, self.visual_field)
             repeat_current_hiddens = hidden_each_step[:, None, :].repeat(1, repeat_len, 1)  
             visual_hiddens = seq_hiddens[:, start_idx:start_idx + self.visual_field, :]
-            # full_hiddens4entity
-            context = torch.stack([self.pooling(visual_hiddens[:, :i+1, :], self.pooling_type) for i in range(visual_hiddens.size()[1])], dim = 1)
             
+            # context bt tok pairs
+            context = self.get_context_hiddens(visual_hiddens, self.context_type)
 #             context_list = []
 #             for i in range(visual_hiddens.size()[1]):
 #                 end_idx = start_idx + i
-#                 ent_context = self.pooling(seq_hiddens[:, start_idx:end_idx + 1, :], self.pooling_type)
-#                 bf_context = self.pooling(seq_hiddens[:, :start_idx, :], self.pooling_type) if start_idx != 0 else padding_context
-#                 af_context = self.pooling(seq_hiddens[:, end_idx + 1:, :], self.pooling_type) if end_idx + 1 != seq_hiddens.size()[-2] else padding_context
+#                 ent_context = self.pooling(seq_hiddens[:, start_idx:end_idx + 1, :], self.context_type)
+#                 bf_context = self.pooling(seq_hiddens[:, :start_idx, :], self.context_type) if start_idx != 0 else padding_context
+#                 af_context = self.pooling(seq_hiddens[:, end_idx + 1:, :], self.context_type) if end_idx + 1 != seq_hiddens.size()[-2] else padding_context
 #                 context_list.append((ent_context + bf_context + af_context) / 3)
 #             context = torch.stack(context_list, dim = 1)
             
@@ -74,9 +137,16 @@ class HandshakingKernel(nn.Module):
                 shaking_hiddens = self.cond_layer_norm(visual_hiddens, repeat_current_hiddens)
             elif self.shaking_type == "pooling":
                 shaking_hiddens = context
+            elif self.shaking_type == "cln_plus2":
+                tok_pair_hiddens = torch.cat([repeat_current_hiddens, visual_hiddens], dim = -1)
+                tok_pair_hiddens = torch.tanh(self.combine_fc(tok_pair_hiddens))
+                shaking_hiddens = self.cln(context, tok_pair_hiddens)   
             elif self.shaking_type == "cln_plus":
                 shaking_hiddens = self.tok_pair_cln(visual_hiddens, repeat_current_hiddens)
                 shaking_hiddens = self.context_cln(shaking_hiddens, context)
+            elif self.shaking_type == "cln_plus3":
+                shaking_hiddens = self.cln_start_tok(context, repeat_current_hiddens)
+                shaking_hiddens = self.cln_end_tok(shaking_hiddens, visual_hiddens)
             elif self.shaking_type == "cat":
                 shaking_hiddens = torch.cat([repeat_current_hiddens, visual_hiddens], dim = -1)
                 shaking_hiddens = torch.tanh(self.combine_fc(shaking_hiddens))
@@ -88,6 +158,9 @@ class HandshakingKernel(nn.Module):
                 cond_hiddens = visual_hiddens * gate
                 res_hiddens = torch.cat([repeat_current_hiddens, visual_hiddens, cond_hiddens], dim = -1)
                 shaking_hiddens = torch.tanh(self.Wo(res_hiddens)) 
+            else:
+                raise ValueError("Wrong shaking_type!")
+                
             shaking_hiddens_list.append(shaking_hiddens)
         long_shaking_hiddens = torch.cat(shaking_hiddens_list, dim = 1)
         return long_shaking_hiddens

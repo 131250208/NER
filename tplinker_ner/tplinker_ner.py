@@ -87,17 +87,25 @@ class HandshakingTaggingScheme:
         return entities
 
 class DataMaker:
-    def __init__(self, handshaking_tagger, tokenizer):
+    def __init__(self, handshaking_tagger, subword_tokenizer, 
+                 text2word_indices_func,
+                 text2char_indices_func
+                 ):
         super().__init__()
         self.handshaking_tagger = handshaking_tagger
-        self.tokenizer = tokenizer
+        self.subword_tokenizer = subword_tokenizer
         
     def get_indexed_data(self, data, max_seq_len, data_type = "train"):
+        '''
+        max_subword_num, 
+         max_word_num,
+         max_char_num
+        '''
         indexed_samples = []
         for sample in tqdm(data, desc = "Generate indexed data"):
             text = sample["text"]
             # codes for bert input
-            codes = self.tokenizer.encode_plus(text, 
+            codes = self.subword_tokenizer.encode_plus(text, 
                                     return_offsets_mapping = True, 
                                     add_special_tokens = False,
                                     max_length = max_seq_len, 
@@ -221,8 +229,7 @@ class Metrics:
         
         example_sum = torch.flatten(gradient_norm).size()[0] # N
 
-        # calculate weights
-            
+        # calculate weights    
         current_weights = torch.zeros(bins).to(gradient.device)
         hits_vec = torch.zeros(bins).to(gradient.device)
         count_hits = 0 # coungradient_normof hits
