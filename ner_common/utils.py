@@ -3,27 +3,66 @@ from tqdm import tqdm
 from IPython.core.debugger import set_trace
 import copy
 from transformers import BertTokenizerFast
+import torch
+
+class WordTokenizer:
+    def __init__(self, word2idx = None):
+        self.word2idx = word2idx
+        
+    def tokenize(self, text):
+        return text.split(" ")
+    
+    def text2word_indices(self, text, max_length = -1):
+        if not self.word2idx:
+            raise ValueError("if you invoke text2word_indices, self.word2idx should be set when initialize WordTokenizer")
+        word_ids = []
+        words = text.split(" ")
+        for w in words:
+            if w not in self.word2idx:
+                word_ids.append(self.word2idx['<UNK>'])
+            else:
+                word_ids.append(self.word2idx[w])
+
+        if len(word_ids) < max_length:
+            word_ids.extend([self.word2idx['<PAD>']] * (max_length - len(word_ids)))
+        if max_length != -1: 
+            word_ids = torch.tensor(word_ids[:max_length]).long()
+        return word_ids
+    
+    def get_word2char_span_map(self, text, max_length = -1):
+        words = self.tokenize(text)
+        word2char_span = []
+        char_num = 0
+        for wd in words:
+            word2char_span.append([char_num, char_num + len(wd)])
+            char_num += len(wd) + 1 # +1: whitespace
+        if len(word2char_span) < max_length:
+            word2char_span.extend([0, 0] * (max_length - len(word2char_span)))
+        if max_length != -1:
+            word2char_span = word2char_span[:max_length]
+        return word2char_span
+    
+    def encode_plus(self, text, max_length = -1):
+        return {
+            "input_ids": self.text2word_indices(text, max_length),
+            "offset_mapping": self.get_word2char_span_map(text, max_length)
+        }
 
 class Preprocessor:
-    def __init__(self, token_type = "word", bert_path = None):
+    def __init__(self, tokenizer, token_type):
+        '''
+        if token_type == "subword", tokenizer must be set to bert encoder
+        "word", word tokenizer
+        '''
         if token_type == "word":
-            self.tokenize = lambda text: text.split(" ")
-            def get_word2char_span_map(text):
-                words = self.tokenize(text)
-                word2char_span = []
-                char_num = 0
-                for wd in words:
-                    word2char_span.append((char_num, char_num + len(wd)))
-                    char_num += len(wd) + 1 # +1: whitespace
-                return word2char_span
-            self.get_tok2char_span_map = get_word2char_span_map
+            self.tokenize = tokenizer.tokenize
+            self.get_tok2char_span_map = lambda text: tokenizer.get_word2char_span_map(text)
             
         elif token_type == "subword":
-            bert_tokenizer = BertTokenizerFast.from_pretrained(bert_path, add_special_tokens = False, do_lower_case = False)
-            self.tokenize = lambda text: bert_tokenizer.tokenize(text)
-            self.get_tok2char_span_map = lambda text: bert_tokenizer.encode_plus(text, 
-                                                           return_offsets_mapping = True, 
-                                                           add_special_tokens = False)["offset_mapping"]
+            self.tokenize = tokenizer.tokenize
+            self.get_tok2char_span_map = lambda text: tokenizer.encode_plus(text, 
+                                                       return_offsets_mapping = True, 
+                                                       add_special_tokens = False)["offset_mapping"]
             
     def clean_data_wo_span(self, ori_data, separate = False, data_type = "train"):
         '''

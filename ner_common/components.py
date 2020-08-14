@@ -7,9 +7,9 @@ import time
 class CLNGRU(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
-        self.reset_cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
-        self.update_cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
-        self.input_cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
+        self.reset_cln = LayerNorm(hidden_size, hidden_size, conditional = True)
+        self.update_cln = LayerNorm(hidden_size, hidden_size, conditional = True)
+        self.input_cln = LayerNorm(hidden_size, hidden_size, conditional = True)
         
     def forward(self, sequence):
         # sequence: (batch_size, sequence_len, hidden_size)
@@ -27,7 +27,7 @@ class CLNGRU(nn.Module):
 class CLNRNN(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
-        self.cln = LayerNorm((hidden_size, ), hidden_size, conditional = True)
+        self.cln = LayerNorm(hidden_size, hidden_size, conditional = True)
         
     def forward(self, sequence):
         # sequence: (batch_size, sequence_len, hidden_size)
@@ -40,25 +40,24 @@ class CLNRNN(nn.Module):
         return torch.stack(hiddens, dim = 1), hidden
     
 class HandshakingKernel(nn.Module):
-    def __init__(self, visual_field, fake_inputs, shaking_type, context_type):
+    def __init__(self, hidden_size, shaking_type, context_type, visual_field):
         super().__init__()
-        hidden_size = fake_inputs.size()[-1]
         
         self.shaking_type = shaking_type
         self.visual_field = visual_field
         self.context_type = context_type
             
         if shaking_type == "cln":
-            self.cond_layer_norm = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.cond_layer_norm = LayerNorm(hidden_size, hidden_size, conditional = True)
         elif shaking_type == "cln_plus":
-            self.tok_pair_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
-            self.context_cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.tok_pair_cln = LayerNorm(hidden_size, hidden_size, conditional = True)
+            self.context_cln = LayerNorm(hidden_size, hidden_size, conditional = True)
         elif shaking_type == "cln_plus2":
             self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
-            self.cln = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.cln = LayerNorm(hidden_size, hidden_size, conditional = True)
         elif shaking_type == "cln_plus3":
-            self.cln_start_tok = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
-            self.cln_end_tok = LayerNorm(fake_inputs.size(), hidden_size, conditional = True)
+            self.cln_start_tok = LayerNorm(hidden_size, hidden_size, conditional = True)
+            self.cln_end_tok = LayerNorm(hidden_size, hidden_size, conditional = True)
         elif shaking_type == "cat":
             self.combine_fc = nn.Linear(hidden_size * 2, hidden_size)
         elif shaking_type == "cat_plus":
@@ -166,11 +165,11 @@ class HandshakingKernel(nn.Module):
         return long_shaking_hiddens
     
 class LayerNorm(nn.Module):
-    def __init__(self, shape, cond_dim=0, center=True, scale=True, epsilon=None, conditional=False,
-                 hidden_units=None, hidden_activation='linear', hidden_initializer='xaiver', **kwargs):
+    def __init__(self, input_dim, cond_dim = 0, center = True, scale = True, epsilon = None, conditional = False,
+                 hidden_units = None, hidden_activation = 'linear', hidden_initializer = 'xaiver', **kwargs):
         super(LayerNorm, self).__init__()
         """
-        shape: inputs.shape
+        input_dim: inputs.shape[-1]
         cond_dim: cond.shape[-1]
         """
         self.center = center
@@ -180,21 +179,21 @@ class LayerNorm(nn.Module):
         # self.hidden_activation = activations.get(hidden_activation) keras中activation为linear时，返回原tensor,unchanged
         self.hidden_initializer = hidden_initializer
         self.epsilon = epsilon or 1e-12
-        self.shape = (shape[-1],)
+        self.input_dim = input_dim
         self.cond_dim = cond_dim
 
         if self.center:
-            self.beta = Parameter(torch.zeros(self.shape))
+            self.beta = Parameter(torch.zeros(input_dim))
         if self.scale:
-            self.gamma = Parameter(torch.ones(self.shape))
+            self.gamma = Parameter(torch.ones(input_dim))
 
         if self.conditional:
             if self.hidden_units is not None:
-                self.hidden_dense = nn.Linear(in_features=self.cond_dim, out_features=self.hidden_units, bias=False)
+                self.hidden_dense = nn.Linear(in_features = self.cond_dim, out_features = self.hidden_units, bias=False)
             if self.center:
-                self.beta_dense = nn.Linear(in_features=self.cond_dim, out_features=self.shape[0], bias=False)
+                self.beta_dense = nn.Linear(in_features = self.cond_dim, out_features = input_dim, bias=False)
             if self.scale:
-                self.gamma_dense = nn.Linear(in_features=self.cond_dim, out_features=self.shape[0], bias=False)
+                self.gamma_dense = nn.Linear(in_features = self.cond_dim, out_features = input_dim, bias=False)
 
         self.initialize_weights()
 
@@ -228,7 +227,7 @@ class LayerNorm(nn.Module):
             for _ in range(len(inputs.shape) - len(cond.shape)):
                 cond = cond.unsqueeze(1)  # cond = K.expand_dims(cond, 1)
             
-            # cond在加入beta和gamma之前做一次变换，保证维度一致
+            # cond在加入beta和gamma之前做一次线性变换，以保证与input维度一致
             if self.center:
                 beta = self.beta_dense(cond) + self.beta
             if self.scale:

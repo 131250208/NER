@@ -8,6 +8,7 @@ import torch.nn as nn
 import json
 from ner_common.components import HandshakingKernel
 from torch.nn.parameter import Parameter
+from transformers import AutoModel
 
 class HandshakingTaggingScheme:
     def __init__(self, tags, max_seq_len, visual_field):
@@ -87,125 +88,271 @@ class HandshakingTaggingScheme:
         return entities
 
 class DataMaker:
-    def __init__(self, handshaking_tagger, subword_tokenizer, 
-                 text2word_indices_func,
+    def __init__(self, handshaking_tagger, 
+                 word_tokenizer,
+                 subword_tokenizer,
                  text2char_indices_func
                  ):
         super().__init__()
         self.handshaking_tagger = handshaking_tagger
+        self.word_tokenizer = word_tokenizer
         self.subword_tokenizer = subword_tokenizer
+        self.text2char_indices_func = text2char_indices_func
         
-    def get_indexed_data(self, data, max_seq_len, data_type = "train"):
+    def get_indexed_data(self, data, max_word_num, max_subword_num, max_char_num_in_tok, data_type = "train"):
         '''
-        max_subword_num, 
-         max_word_num,
-         max_char_num
+        indexing data
         '''
         indexed_samples = []
         for sample in tqdm(data, desc = "Generate indexed data"):
             text = sample["text"]
             # codes for bert input
-            codes = self.subword_tokenizer.encode_plus(text, 
+            bert_codes = self.subword_tokenizer.encode_plus(text, 
                                     return_offsets_mapping = True, 
                                     add_special_tokens = False,
-                                    max_length = max_seq_len, 
+                                    max_length = max_subword_num, 
                                     truncation = True,
                                     pad_to_max_length = True)
-
-
+        
+            # get bert codes
+            subword_input_ids = torch.tensor(bert_codes["input_ids"]).long()
+            attention_mask = torch.tensor(bert_codes["attention_mask"]).long()
+            token_type_ids = torch.tensor(bert_codes["token_type_ids"]).long()
+            subword2char_span = bert_codes["offset_mapping"]
+            
+            # word level tokenizer
+            word_input_ids = self.word_tokenizer.text2word_indices(text, max_word_num)
+#             word_input_ids = word_codes["input_ids"]
+#             word2char_span = word_codes["offset_mapping"]
+            
+            # char input ids
+            char_input_ids = self.text2char_indices_func(text)
+            def padding_char_input_ids(offset_mapping, max_char_num_in_tok):
+                char_input_ids_padded = []
+                for span in offset_mapping:
+                    char_ids = char_input_ids[span[0]:span[1]]
+                    assert len(char_ids) <= max_char_num_in_tok
+                    if len(char_ids) < max_char_num_in_tok:
+                        char_ids.extend([0] * (max_char_num_in_tok - len(char_ids)))
+                    char_input_ids_padded.extend(char_ids)
+                return torch.tensor(char_input_ids_padded).long()
+            char_input_ids4subword = padding_char_input_ids(subword2char_span, max_char_num_in_tok)
+#             char_input_ids4word = padding_char_input_ids(word2char_span, max_char_num_in_word)
+            
+#             # word2subword_span
+#             words = self.word_tokenizer.tokenize(text)
+#             word2subword_span = []
+#             subword_num = 0
+#             for wd in words:
+#                 word2subword_span.append([subword_num, subword_num + len(self.subword_tokenizer.tokenize(wd))])
+#             if len(word2subword_span) < max_word_num:
+#                 word2subword_span.extend([0, 0] * (max_word_num - len(word2subword_span)))
+#             if max_word_num != -1:
+#                 word2subword_span = word2subword_span[:max_word_num]
+                
+            # word_input_ids_repeat
+            words = self.word_tokenizer.tokenize(text)
+            subword2word_idx_map = []
+            for wd_idx, wd in enumerate(words):
+                for subwd in self.subword_tokenizer.tokenize(wd):
+                    if subwd != "[PAD]":
+                        subword2word_idx_map.append(wd_idx)
+            if len(subword2word_idx_map) < max_subword_num:
+                subword2word_idx_map.extend([len(words) - 1] * (max_subword_num - len(subword2word_idx_map)))
+            subword2word_idx_map = torch.tensor(subword2word_idx_map).long()
+            
+            
             # get spots
             matrix_spots = None
             if data_type != "test":
                 matrix_spots = self.handshaking_tagger.get_spots(sample)
-
-            # get codes
-            input_ids = torch.tensor(codes["input_ids"]).long()
-            attention_mask = torch.tensor(codes["attention_mask"]).long()
-            token_type_ids = torch.tensor(codes["token_type_ids"]).long()
-            offset_map = codes["offset_mapping"]
-
+                
             sample_tp = (sample, 
-                     input_ids,
+                     subword_input_ids,
                      attention_mask,
                      token_type_ids,
-                     offset_map,
-                     matrix_spots,
+                     subword2char_span,
+                     char_input_ids4subword,
+                     word_input_ids,
+                     subword2word_idx_map,
+#                      char_input_ids4word, 
+                     matrix_spots
                     )
             indexed_samples.append(sample_tp)       
         return indexed_samples
     
     def generate_batch(self, batch_data, data_type = "train"):
         sample_list = []
-        input_ids_list = []
+        subword_input_ids_list = []
         attention_mask_list = []
         token_type_ids_list = [] 
-        offset_map_list = []
+        subword2char_span_list = []
+        char_input_ids4subword_list = []
+        word_input_ids_list = []
+        subword2word_idx_map_list = []
         matrix_spots_batch = []
 
         for tp in batch_data:
             sample_list.append(tp[0])
-            input_ids_list.append(tp[1])
+            subword_input_ids_list.append(tp[1])
             attention_mask_list.append(tp[2])        
-            token_type_ids_list.append(tp[3])        
-            offset_map_list.append(tp[4])
+            token_type_ids_list.append(tp[3])  
+            subword2char_span_list.append(tp[4])
+            char_input_ids4subword_list.append(tp[5])
+            word_input_ids_list.append(tp[6])
+            subword2word_idx_map_list.append(tp[7])
             if data_type != "test":
-                matrix_spots_batch.append(tp[5])
+                matrix_spots_batch.append(tp[8])
 
-        batch_input_ids = torch.stack(input_ids_list, dim = 0)
+        batch_subword_input_ids = torch.stack(subword_input_ids_list, dim = 0)
         batch_attention_mask = torch.stack(attention_mask_list, dim = 0)
         batch_token_type_ids = torch.stack(token_type_ids_list, dim = 0)
+        
+        batch_char_input_ids4subword = torch.stack(char_input_ids4subword_list, dim = 0)
+        batch_word_input_ids = torch.stack(word_input_ids_list, dim = 0)
+        batch_subword2word_idx_map = torch.stack(subword2word_idx_map_list, dim = 0)
         
         batch_shaking_tag = None
         if data_type != "test":
             batch_shaking_tag = self.handshaking_tagger.spots2shaking_tag4batch(matrix_spots_batch)
 
-        return sample_list, batch_input_ids, batch_attention_mask, batch_token_type_ids, offset_map_list, batch_shaking_tag  
+        return sample_list, \
+            batch_subword_input_ids, \
+            batch_attention_mask, \
+            batch_token_type_ids, \
+            subword2char_span_list, \
+            batch_char_input_ids4subword, \
+            batch_word_input_ids, \
+            batch_subword2word_idx_map, \
+            batch_shaking_tag
     
 
 class TPLinkerNER(nn.Module):
     def __init__(self, 
-             encoder,
-             use_last_k_layers_hiddens,
-             add_bilstm_on_the_top,
-             bilstm_layers,
-             bilstm_dropout,
-             entity_type_num, 
-             fake_input, 
-             shaking_type,
-             pooling_type,
-             visual_field):
+             char_encoder_config,
+             bert_cofig,
+             word_encoder_config,
+             handshaking_kernel_config,
+             activate_enc_fc,
+             entity_type_num):
         super().__init__()
-        self.encoder = encoder
-        self.use_last_k_layers_hiddens = use_last_k_layers_hiddens
-        shaking_hidden_size = encoder.config.hidden_size
-        self.add_bilstm_on_the_top = add_bilstm_on_the_top
-        if add_bilstm_on_the_top:
-            self.bilstm = nn.LSTM(shaking_hidden_size, 
-                           shaking_hidden_size // 2, 
-                           num_layers = bilstm_layers, 
-                           dropout = bilstm_dropout,
-                           bidirectional = True, 
-                           batch_first = True)
-        self.fc = nn.Linear(shaking_hidden_size, entity_type_num)
+        '''
+        char_encoder_config = {
+            "char_size": len(char2idx), # 
+            "emb_dim": char_emb_dim,
+            "emb_dropout": char_emb_dropout,
+            "bilstm_layers": char_bilstm_layers,
+            "bilstm_dropout": char_bilstm_dropout,
+            "max_char_num_in_tok": max_char_num_in_tok,
+        }
+        bert_cofig = {
+            "path": encoder_path,
+            "fintune": bert_finetune,
+            "use_last_k_layers": use_last_k_layers_hiddens,
+        }
+        word_encoder_config = {
+            "init_word_embedding_matrix": init_word_embedding_matrix,
+            "emb_dropout": word_emb_dropout,
+            "bilstm_layers": word_bilstm_layers,
+            "bilstm_dropout": word_bilstm_dropout,
+            "freeze_word_emb": freeze_word_emb,
+        }
+
+        handshaking_kernel_config = {
+            "shaking_type": hyper_parameters["shaking_type"],
+            "context_type": hyper_parameters["context_type"],
+            "visual_field": visual_field, # 
+        }
+        '''
+
+        # bert 
+        bert_path = bert_cofig["path"]
+        bert_finetune = bert_cofig["fintune"]
+        self.use_last_k_layers_bert = bert_cofig["use_last_k_layers"]
+        self.bert = AutoModel.from_pretrained(bert_path)
+        if not bert_finetune: # if train without finetuning bert
+            for param in self.bert.parameters():
+                param.requires_grad = False       
+        bert_hidden_size = self.bert.config.hidden_size
+        
+        # char encoder
+        char_size = char_encoder_config["char_size"]
+        char_emb_dim = char_encoder_config["emb_dim"]
+        char_emb_dropout = char_encoder_config["emb_dropout"]
+        char_bilstm_layers = char_encoder_config["bilstm_layers"]
+        char_bilstm_dropout = char_encoder_config["bilstm_dropout"]
+        max_char_num_in_subword = char_encoder_config["max_char_num_in_tok"]
+        self.char_emb = nn.Embedding(char_size, char_emb_dim)
+        self.char_emb_dropout = nn.Dropout(p = char_emb_dropout)
+        self.char_lstm = nn.LSTM(char_emb_dim, 
+                       char_emb_dim // 2, 
+                       num_layers = char_bilstm_layers, 
+                       dropout = char_bilstm_dropout,
+                       bidirectional = True,
+                       batch_first = True)
+        self.char_cnn = nn.Conv1d(char_emb_dim, char_emb_dim, max_char_num_in_subword, stride = max_char_num_in_subword)
+        
+        # word encoder
+        init_word_embedding_matrix = word_encoder_config["init_word_embedding_matrix"]
+        word_emb_dropout = word_encoder_config["emb_dropout"]
+        word_bilstm_layers = word_encoder_config["bilstm_layers"]
+        word_bilstm_dropout = word_encoder_config["bilstm_dropout"]
+        freeze_word_emb = word_encoder_config["freeze_word_emb"]
+        self.word_emb = nn.Embedding.from_pretrained(init_word_embedding_matrix, freeze = freeze_word_emb)
+        self.word_emb_dropout = nn.Dropout(p = word_emb_dropout)
+        word_emb_dim = init_word_embedding_matrix.size()[-1]
+        self.word_lstm = nn.LSTM(word_emb_dim, 
+                         word_emb_dim // 2, 
+                         num_layers = word_bilstm_layers,
+                         dropout = word_bilstm_dropout,
+                         bidirectional = True,
+                         batch_first = True)
+        
+        # encoding fc
+        self.enc_fc = nn.Linear(bert_hidden_size + word_emb_dim + char_emb_dim, bert_hidden_size)
+        self.activate_enc_fc = activate_enc_fc
         
         # handshaking kernel
-        self.handshaking_kernel = HandshakingKernel(visual_field, fake_input, shaking_type, pooling_type)
+        shaking_type = handshaking_kernel_config["shaking_type"]
+        context_type = handshaking_kernel_config["context_type"]
+        visual_field = handshaking_kernel_config["visual_field"]
+        self.handshaking_kernel = HandshakingKernel(bert_hidden_size, shaking_type, context_type, visual_field)
         
-    def forward(self, input_ids, attention_mask, token_type_ids):
-        # input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
-        context_outputs = self.encoder(input_ids, attention_mask, token_type_ids)
-        # last_hidden_state: (batch_size, seq_len, hidden_size)
+        # decoding fc
+        self.dec_fc = nn.Linear(bert_hidden_size, entity_type_num)
+        
+    def forward(self, char_input_ids, subword_input_ids, attention_mask, token_type_ids, word_input_ids, subword2word_idx):
+        # subword_input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
+        context_outputs = self.bert(subword_input_ids, attention_mask, token_type_ids)
+        # last_hidden_state: (batch_size, seq_len, bert_hidden_size)
         hidden_states = context_outputs[2]
-        last_hidden_state = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_hiddens:], dim = 0), dim = 0)
-        if self.add_bilstm_on_the_top:
-            last_hidden_state, _ = self.bilstm(last_hidden_state)
+        subword_hiddens = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_bert:], dim = 0), dim = 0)
         
-        # shaking_hiddens: (batch_size, shaking_seq_len, hidden_size)
+        # char_input_ids: (batch_size, seq_len * max_char_num_in_subword)
+        # char_input_emb/char_hiddens: (batch_size, seq_len * max_char_num_in_subword, char_emb_dim)
+        # char_conv_output: (batch_size, seq_len, char_emb_dim)
+        char_input_emb = self.char_emb(char_input_ids)
+        char_input_emb = self.char_emb_dropout(char_input_emb)
+        char_hiddens, _ = self.char_lstm(char_input_emb)
+        char_conv_output = self.char_cnn(char_hiddens.permute(0, 2, 1)).permute(0, 2, 1)
+        
+        # word_input_ids: (batch_size, seq_len)
+        # word_input_emb/word_hiddens: batch_size, seq_len, word_emb_dim)
+        word_input_emb = self.word_emb(word_input_ids)
+        word_input_emb = self.word_emb_dropout(word_input_emb)
+        word_hiddens, _ = self.word_lstm(word_input_emb)
+        word_chosen_hiddens = torch.gather(word_hiddens, 1, subword2word_idx[:,:,None].repeat(1, 1, word_hiddens.size()[-1]))
+        
+        combined_hiddens = self.enc_fc(torch.cat([char_conv_output, subword_hiddens, word_chosen_hiddens], dim = -1))
+        if self.activate_enc_fc:
+            combined_hiddens = torch.tanh(combined_hiddens)
+        
+        # shaking_hiddens: (batch_size, shaking_seq_len, bert_hidden_size)
         # shaking_seq_len: max_seq_len * vf - sum(1, vf)
-        shaking_hiddens = self.handshaking_kernel(last_hidden_state)
+        shaking_hiddens = self.handshaking_kernel(combined_hiddens)
         
         # ent_shaking_outputs: (batch_size, shaking_seq_len, entity_type_num)
-        ent_shaking_outputs = self.fc(shaking_hiddens)
+        ent_shaking_outputs = self.dec_fc(shaking_hiddens)
 
         return ent_shaking_outputs
     
