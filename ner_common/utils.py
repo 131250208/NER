@@ -2,12 +2,68 @@ import re
 from tqdm import tqdm
 from IPython.core.debugger import set_trace
 import copy
+from transformers import BertTokenizerFast
+import torch
+
+class WordTokenizer:
+    def __init__(self, word2idx = None):
+        self.word2idx = word2idx
+        
+    def tokenize(self, text):
+        return text.split(" ")
+    
+    def text2word_indices(self, text, max_length = -1):
+        if not self.word2idx:
+            raise ValueError("if you invoke text2word_indices, self.word2idx should be set when initialize WordTokenizer")
+        word_ids = []
+        words = text.split(" ")
+        for w in words:
+            if w not in self.word2idx:
+                word_ids.append(self.word2idx['<UNK>'])
+            else:
+                word_ids.append(self.word2idx[w])
+
+        if len(word_ids) < max_length:
+            word_ids.extend([self.word2idx['<PAD>']] * (max_length - len(word_ids)))
+        if max_length != -1: 
+            word_ids = torch.tensor(word_ids[:max_length]).long()
+        return word_ids
+    
+    def get_word2char_span_map(self, text, max_length = -1):
+        words = self.tokenize(text)
+        word2char_span = []
+        char_num = 0
+        for wd in words:
+            word2char_span.append([char_num, char_num + len(wd)])
+            char_num += len(wd) + 1 # +1: whitespace
+        if len(word2char_span) < max_length:
+            word2char_span.extend([0, 0] * (max_length - len(word2char_span)))
+        if max_length != -1:
+            word2char_span = word2char_span[:max_length]
+        return word2char_span
+    
+    def encode_plus(self, text, max_length = -1):
+        return {
+            "input_ids": self.text2word_indices(text, max_length),
+            "offset_mapping": self.get_word2char_span_map(text, max_length)
+        }
 
 class Preprocessor:
-    def __init__(self, tokenize_func, get_tok2char_span_map_func):
-        self._get_tok2char_span_map = get_tok2char_span_map_func
-        self._tokenize = tokenize_func
-    
+    def __init__(self, tokenizer, token_type):
+        '''
+        if token_type == "subword", tokenizer must be set to bert encoder
+        "word", word tokenizer
+        '''
+        if token_type == "word":
+            self.tokenize = tokenizer.tokenize
+            self.get_tok2char_span_map = lambda text: tokenizer.get_word2char_span_map(text)
+            
+        elif token_type == "subword":
+            self.tokenize = tokenizer.tokenize
+            self.get_tok2char_span_map = lambda text: tokenizer.encode_plus(text, 
+                                                       return_offsets_mapping = True, 
+                                                       add_special_tokens = False)["offset_mapping"]
+            
     def clean_data_wo_span(self, ori_data, separate = False, data_type = "train"):
         '''
         rm duplicate whitespaces
@@ -68,7 +124,10 @@ class Preprocessor:
         return clean_data, bad_samples
 
     def _get_char2tok_span(self, text):
-        tok2char_span = self._get_tok2char_span_map(text)
+        '''
+        map character level span to token level span
+        '''
+        tok2char_span = self.get_tok2char_span_map(text)
         # get the number of characters
         char_num = None
         for tok_ind in range(len(tok2char_span) - 1, -1, -1):
@@ -88,6 +147,8 @@ class Preprocessor:
     
     def _get_ent2char_spans(self, text, entities, ignore_subword = True):
         '''
+        map entity to all possible character spans
+        e.g. {"entity1": [[0, 1], [18, 19]]}
         if ignore_subword, look for entities with whitespace around, e.g. "entity" -> " entity "
         '''
         entities = sorted(entities, key = lambda x: len(x), reverse = True)
@@ -105,7 +166,7 @@ class Preprocessor:
         return ent2char_spans
     
     def add_char_span(self, dataset, ignore_subword = True):
-        miss_sample_list = []
+        samples_w_wrong_entity = [] # samples with entities that do not exist in the text, please check if any
         for sample in tqdm(dataset, desc = "Adding char level spans"):
             entities = [ent["text"] for ent in sample["entity_list"]]
             ent2char_spans = self._get_ent2char_spans(sample["text"], entities, ignore_subword = ignore_subword)
@@ -130,13 +191,13 @@ class Preprocessor:
                     })
                     
             if len(sample["entity_list"]) > len(new_ent_list):
-                miss_sample_list.append(sample)
+                samples_w_wrong_entity.append(sample)
             sample["entity_list"] = new_ent_list
-        return dataset, miss_sample_list
+        return dataset, samples_w_wrong_entity
     
     def add_tok_span(self, data):
         '''
-        data: must has char span
+        data: char span is required
         '''
         for sample in tqdm(data, desc = "Adding token level span"):
             text = sample["text"]
@@ -148,13 +209,40 @@ class Preprocessor:
                 ent["tok_span"] = tok_span
         return data
     
-    def split_into_short_samples(self, sample_list, max_seq_len, sliding_len = 50, encoder = "BERT", data_type = "train"):
+    def check_tok_span(self, data):
+        entities_to_fix = []
+        for sample in tqdm(data, desc = "check tok spans"):
+            text = sample["text"]
+            tok2char_span = self.get_tok2char_span_map(text)
+            for ent in sample["entity_list"]:
+                tok_span = ent["tok_span"]
+                char_span_list = tok2char_span[tok_span[0]:tok_span[1]]
+                char_span = [char_span_list[0][0], char_span_list[-1][1]]
+                text_extr = text[char_span[0]:char_span[1]]
+                gold_char_span = ent["char_span"]
+                if not(char_span[0] == gold_char_span[0] and char_span[1] == gold_char_span[1] and text_extr == ent["text"]):
+                    bad_ent = copy.deepcopy(ent)
+                    bad_ent["extr_text"] = text_extr
+                    entities_to_fix.append(bad_ent)
+
+        span_error_memory = set()
+        for ent in entities_to_fix:
+            err_mem = "gold: {} --- extr: {}".format(ent["text"], ent["extr_text"])
+            span_error_memory.add(err_mem)
+        return span_error_memory
+    
+    def split_into_short_samples(self, 
+                     sample_list, 
+                     max_seq_len, 
+                     sliding_len = 50, 
+                     encoder = "BERT", 
+                     data_type = "train"):
         new_sample_list = []
         for sample in tqdm(sample_list, desc = "Splitting"):
             medline_id = sample["id"]
             text = sample["text"]
-            tokens = self._tokenize(text)
-            tok2char_span = self._get_tok2char_span_map(text)
+            tokens = self.tokenize(text)
+            tok2char_span = self.get_tok2char_span_map(text)
 
             # sliding on token level
             for start_ind in range(0, len(tokens), sliding_len):
