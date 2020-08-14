@@ -164,7 +164,7 @@ class TPLinkerNER(nn.Module):
              entity_type_num, 
              fake_input, 
              shaking_type,
-             pooling_type,
+             context_type,
              visual_field):
         super().__init__()
         self.encoder = encoder
@@ -181,7 +181,7 @@ class TPLinkerNER(nn.Module):
         self.fc = nn.Linear(shaking_hidden_size, entity_type_num)
         
         # handshaking kernel
-        self.handshaking_kernel = HandshakingKernel(visual_field, fake_input, shaking_type, pooling_type)
+        self.handshaking_kernel = HandshakingKernel(visual_field, fake_input, shaking_type, context_type)
         
     def forward(self, input_ids, attention_mask, token_type_ids):
         # input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
