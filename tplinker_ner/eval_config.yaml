@@ -1,0 +1,35 @@
+exp_name: genia
+model_state_dict_dir: ./wandb
+run_ids:
+ - rmy9ek2j
+
+last_k_model: 5
+
+data_home: ../data/data4biobert_v1.0_pubmed_pmc
+test_data: "*test*.json"
+meta: meta.json
+ 
+device_num: 3
+
+# >>>>>>>>encoder>>>>>>>>>>>
+encoder: BERT
+bert_path: /home/wangyucheng/opt/transformers_models_h5/biobert_v1.0_pubmed_pmc
+use_last_k_layers_hiddens: 1
+add_bilstm_on_the_top: false
+bilstm_layers: 2
+bilstm_dropout: 0.05
+
+# parameters
+shaking_type: cln_plus
+batch_size: 32
+force_split: false
+max_test_seq_len: 150
+sliding_len: 100
+visual_field: -1 # -1: use recommended value
+correct: whole_span # head_n_tail, only_head, whole_text
+
+# results
+save_res: false
+save_res_dir: ../results
+# score: set true only when test set tagged
+score: true

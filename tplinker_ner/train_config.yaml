@@ -1,0 +1,87 @@
+experiment_name: genia
+run_name: cln_p+biobert
+
+data_home: ../data/bilstm
+# # biobert-large-cased-pubmed-58k
+# # bert-large-cased
+# # bert-base-cased
+# # biobert_v1.0_pubmed_pmc
+
+# data file name
+train_data: train_data.json
+valid_data: valid_data.json
+meta: meta.json
+word2idx: word2idx.json
+char2idx: char2idx.json
+ 
+device_num: 1
+
+wandb: false
+path_to_save_model: ../model_state
+
+hyper_parameters:
+ # >>>>>>>>>Preprocessing>>>>>>>>>>>
+#  token_type: subword
+ max_seq_len: 100
+ pred_max_seq_len: 128
+ sliding_len: 20
+ pred_sliding_len: 20
+ 
+ # >>>>>>>>Train config>>>>>>>>>>>>
+ batch_size: 32
+ parallel: false
+ epochs: 100
+ lr: 1e-3
+ seed: 2333
+ log_interval: 10
+ ## learning schedule
+ ### CAWR
+ scheduler: CAWR # Step
+ T_mult: 1
+ rewarm_epoch_num: 3
+#  ### StepLR
+#  scheduler: Step
+#  decay_rate: 0.99
+#  decay_steps: 100
+ 
+ # >>>>>>>>Model config>>>>>>>>>>>>>
+ ## char encoder
+ use_char_encoder: true
+ char_emb_dim: 64
+ char_emb_dropout: 0.1
+ char_bilstm_layers: 2
+ char_bilstm_dropout: 0.05
+ ## subword encoder
+ use_bert: false
+ encoder: BERT
+ bert_path: ../../pretrained_models/biobert_v1.0_pubmed_pmc # biobert_v1.0_pubmed_pmc
+ use_last_k_bert_layers: 1
+ bert_finetune: true
+ ## word encoder
+ use_word_encoder: true
+ word_emb_key: pubmed # pubmed, glove
+ word_emb_dropout: 0.1
+ word_bilstm_layers: 2
+ word_bilstm_dropout: 0.05
+ freeze_word_emb: false
+ ## flair
+ use_flair: false
+ flair_embedding_ids:
+  - pubmed-forward
+  - pubmed-backward
+ ## handshaking kernel
+ visual_field: -1 # -1: use recommended value
+ shaking_type: cln_plus
+ context_type: lstm
+ ## encoding fc
+ enc_hidden_size: 768
+ activate_enc_fc: false
+ 
+# when to save the model state dict
+f1_2_save: 0
+# whether train from scratch
+fr_scratch: true
+# note 
+note: start from scratch;
+# if not fr scratch, set a model_state_dict
+model_state_dict_path: stake

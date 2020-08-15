@@ -3,7 +3,6 @@ wandb/
 *model*/
 *data*/
 results/
-*.yaml
 *.json
 *.emb
 *.pt

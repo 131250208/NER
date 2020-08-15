@@ -1,0 +1,25 @@
+exp_name: en_ace05
+data_in_dir: ../normal_data
+
+# use_bert: true
+# bert_path: ../../pretrained_models/bert-base-cased
+# # biobert-large-cased-pubmed-58k
+# # bert-large-cased
+# # bert-base-cased
+# # biobert_v1.0_pubmed_pmc
+
+use_bert: false
+data_out_dir: ../data/bilstm
+
+# sparate will change original text, which will make the original span invalid.
+# if set true, add_char_span must be set true to add new span (which may introduce wrong spans that is not given in original data)
+# parameters
+# ignore_subword: ignore subwords when search entities(in adding character level spans)
+# separate_tok_by_white: e.g. "$%sdkn839," -> "$% sdkn839 ,"
+clean_wo_span: false
+add_char_span: false
+ignore_subword: false
+clean_w_span: false
+
+separate_char_by_white: false
+check_tok_span: true
