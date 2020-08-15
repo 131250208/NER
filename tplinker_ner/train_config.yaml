@@ -1,5 +1,5 @@
 experiment_name: genia
-run_name: cat_p+bilstm
+run_name: cln_p+bilstm
 
 data_home: ../data/bilstm
 # # biobert-large-cased-pubmed-58k
@@ -14,7 +14,7 @@ meta: meta.json
 word2idx: word2idx.json
 char2idx: char2idx.json
  
-device_num: 3
+device_num: 0
 
 wandb: true
 path_to_save_model: ../model_state
@@ -31,7 +31,7 @@ hyper_parameters:
  batch_size: 36
  parallel: false
  epochs: 100
- lr: 5e-4
+ lr: 1e-4
  seed: 2333
  log_interval: 10
  ## learning schedule
@@ -90,7 +90,7 @@ hyper_parameters:
  ## handshaking kernel
  handshaking_kernel_config:
   visual_field: -1 # -1: use recommended value
-  shaking_type: cat_plus
+  shaking_type: cln_plus
   context_type: lstm
  ## encoding fc
  enc_hidden_size: 768

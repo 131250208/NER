@@ -165,16 +165,17 @@ def split(data, max_seq_len, sliding_len, data_type = "train"):
     print("max token number of {} data: {}".format(data_type, max_tok_num))
     
     if max_tok_num > max_seq_len:
-        print("max token number of {} data is greater than the setting, need to split!".format(data_type))
+        print("max token number of {} data is greater than the setting, need to split!, max_seq_len of {} data is {}".format(data_type, data_type, max_seq_len))
         short_data = preprocessor.split_into_short_samples(data, 
                                           max_seq_len, 
                                           sliding_len = sliding_len)
     else:
         short_data = data
-        print("max token number of {} data is less than the setting, no need to split!".format(data_type))
-    return short_data
-short_train_data = split(train_data, max_seq_len, sliding_len, "train")
-short_valid_data = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid")
+        max_seq_len = max_tok_num
+        print("max token number of {} data is less than the setting, no need to split! max_seq_len of {} data is reset to {}.".format(data_type, data_type, max_tok_num))
+    return short_data, max_seq_len
+short_train_data, max_seq_len = split(train_data, max_seq_len, sliding_len, "train")
+short_valid_data, pred_max_seq_len = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid")
 
 
 # In[ ]:
@@ -458,6 +459,7 @@ if parallel:
     ent_extractor = nn.DataParallel(ent_extractor)
 ent_extractor = ent_extractor.to(device)
 print(ent_extractor)
+
 
 # # Metrics
 
