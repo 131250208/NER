@@ -1,7 +1,7 @@
 experiment_name: genia
-run_name: cln_p+bilstm
+run_name: cat_p+bilstm
 
-data_home: ../data/bert-base-cased
+data_home: ../data/bilstm
 # # biobert-large-cased-pubmed-58k
 # # bert-large-cased
 # # bert-base-cased
@@ -14,24 +14,24 @@ meta: meta.json
 word2idx: word2idx.json
 char2idx: char2idx.json
  
-device_num: 0
+device_num: 3
 
-wandb: false
+wandb: true
 path_to_save_model: ../model_state
 
 hyper_parameters:
  # >>>>>>>>>Preprocessing>>>>>>>>>>>
 #  token_type: subword
- max_seq_len: 100
- pred_max_seq_len: 128
+ max_seq_len: 150
+ pred_max_seq_len: 150
  sliding_len: 20
  pred_sliding_len: 20
  
  # >>>>>>>>Train config>>>>>>>>>>>>
- batch_size: 32
+ batch_size: 36
  parallel: false
  epochs: 100
- lr: 1e-4
+ lr: 5e-4
  seed: 2333
  log_interval: 10
  ## learning schedule
@@ -61,7 +61,7 @@ hyper_parameters:
    - 0.05
    - 0.
  ## bert: subword encoder
- use_bert: true
+ use_bert: false
  bert_config:
   path: ../../pretrained_models/biobert_v1.0_pubmed_pmc # biobert_v1.0_pubmed_pmc
   use_last_k_layers: 1
@@ -90,10 +90,10 @@ hyper_parameters:
  ## handshaking kernel
  handshaking_kernel_config:
   visual_field: -1 # -1: use recommended value
-  shaking_type: cln_plus
+  shaking_type: cat_plus
   context_type: lstm
  ## encoding fc
- enc_hidden_size: 600
+ enc_hidden_size: 768
  activate_enc_fc: false
  
 # when to save the model state dict

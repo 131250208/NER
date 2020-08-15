@@ -457,7 +457,7 @@ ent_extractor = TPLinkerNER(char_encoder_config,
 if parallel:
     ent_extractor = nn.DataParallel(ent_extractor)
 ent_extractor = ent_extractor.to(device)
-
+print(ent_extractor)
 
 # # Metrics
 
