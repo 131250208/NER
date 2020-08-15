@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 try:
@@ -40,14 +40,14 @@ import numpy as np
 
 # # Superparameter
 
-# In[2]:
+# In[ ]:
 
 
 print(torch.cuda.device_count(), "GPUs are available")
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-# In[3]:
+# In[ ]:
 
 
 # hyperparameters
@@ -71,7 +71,7 @@ else:
         os.makedirs(model_state_dict_dir)
 
 
-# In[4]:
+# In[ ]:
 
 
 # >>>>>>>>>>>preprocessing config>>>>>>>>>>>>>>
@@ -95,39 +95,22 @@ epoch_num = hyper_parameters["epochs"]
 
 # >>>>>>>>>>model config>>>>>>>>>>>>
 ## char encoder
-char_encoder_config = {
-    "emb_dim": hyper_parameters["char_emb_dim"],
-    "emb_dropout": hyper_parameters["char_emb_dropout"],
-    "bilstm_layers": hyper_parameters["char_bilstm_layers"],
-    "bilstm_dropout": hyper_parameters["char_bilstm_dropout"],
-} if hyper_parameters["use_char_encoder"] else None
+char_encoder_config = hyper_parameters["char_encoder_config"] if hyper_parameters["use_char_encoder"] else None
+
 ## bert encoder
-bert_config = {
-    "path": hyper_parameters["bert_path"],
-    "fintune": hyper_parameters["bert_finetune"],
-    "use_last_k_layers": hyper_parameters["use_last_k_bert_layers"],
-} if hyper_parameters["use_bert"] else None
+bert_config = hyper_parameters["bert_config"] if hyper_parameters["use_bert"] else None
 use_bert = hyper_parameters["use_bert"]
 
 ## word encoder
-word_encoder_config = {
-    "emb_key": hyper_parameters["word_emb_key"],
-    "emb_dropout": hyper_parameters["word_emb_dropout"],
-    "bilstm_layers": hyper_parameters["word_bilstm_layers"],
-    "bilstm_dropout": hyper_parameters["word_bilstm_dropout"],
-    "freeze_word_emb": hyper_parameters["freeze_word_emb"],
-} if hyper_parameters["use_word_encoder"] else None
+word_encoder_config = hyper_parameters["word_encoder_config"] if hyper_parameters["use_word_encoder"] else None
+
 ## flair config
 flair_config = {
     "embedding_ids": hyper_parameters["flair_embedding_ids"],
 } if hyper_parameters["use_flair"] else None
 
 ## handshaking_kernel
-handshaking_kernel_config = {
-    "shaking_type": hyper_parameters["shaking_type"],
-    "context_type": hyper_parameters["context_type"],
-    "visual_field": hyper_parameters["visual_field"], 
-}
+handshaking_kernel_config = hyper_parameters["handshaking_kernel_config"]
 
 ## encoding fc
 enc_hidden_size = hyper_parameters["enc_hidden_size"]
@@ -145,7 +128,7 @@ char2idx_path = os.path.join(data_home, experiment_name, config["char2idx"])
 
 # # Load Data
 
-# In[5]:
+# In[ ]:
 
 
 train_data = json.load(open(train_data_path, "r", encoding = "utf-8"))
@@ -154,7 +137,7 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 
 # # Split
 
-# In[6]:
+# In[ ]:
 
 
 # init tokenizers
@@ -167,7 +150,7 @@ tokenizer4preprocess = bert_tokenizer if use_bert else word_tokenizer
 preprocessor = Preprocessor(tokenizer4preprocess, use_bert)
 
 
-# In[7]:
+# In[ ]:
 
 
 def split(data, max_seq_len, sliding_len, data_type = "train"):
@@ -194,7 +177,7 @@ short_train_data = split(train_data, max_seq_len, sliding_len, "train")
 short_valid_data = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid")
 
 
-# In[8]:
+# In[ ]:
 
 
 # # check tok spans of new short article dict list
@@ -211,7 +194,7 @@ short_valid_data = split(valid_data, pred_max_seq_len, pred_sliding_len, "valid"
 
 # # Tagging
 
-# In[9]:
+# In[ ]:
 
 
 meta = json.load(open(meta_path, "r", encoding = "utf-8"))
@@ -221,7 +204,7 @@ if meta["visual_field_rec"] > handshaking_kernel_config["visual_field"]:
     print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(handshaking_kernel_config["visual_field"]))
 
 
-# In[10]:
+# In[ ]:
 
 
 def sample_equal_to(sample1, sample2):
@@ -239,14 +222,14 @@ def sample_equal_to(sample1, sample2):
     return True
 
 
-# In[11]:
+# In[ ]:
 
 
 handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len, handshaking_kernel_config["visual_field"])
 handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, handshaking_kernel_config["visual_field"])
 
 
-# In[12]:
+# In[ ]:
 
 
 # # check tagging and decoding
@@ -285,7 +268,7 @@ handshaking_tagger4valid = HandshakingTaggingScheme(tags, pred_max_seq_len, hand
 
 # # Character Index
 
-# In[13]:
+# In[ ]:
 
 
 # character indexing
@@ -308,7 +291,7 @@ def text2char_indices(text, max_seq_len = -1):
 
 # # Dataset
 
-# In[14]:
+# In[ ]:
 
 
 if use_bert:
@@ -319,7 +302,7 @@ else:
     data_maker4valid = DataMaker(handshaking_tagger4valid, word_tokenizer, text2char_indices)
 
 
-# In[15]:
+# In[ ]:
 
 
 class MyDataset(Dataset):
@@ -333,7 +316,7 @@ class MyDataset(Dataset):
         return len(self.data)
 
 
-# In[16]:
+# In[ ]:
 
 
 # max word num, max subword num, max char num
@@ -353,7 +336,7 @@ if use_bert:
     print("max_subword_num_train: {}, max_subword_num_val: {}".format(max_subword_num_train, max_subword_num_valid))
 
 
-# In[17]:
+# In[ ]:
 
 
 # max character num of a single word
@@ -376,7 +359,7 @@ def get_max_char_num_in_word(data):
     return max_char_num
 
 
-# In[18]:
+# In[ ]:
 
 
 if use_bert:
@@ -385,7 +368,7 @@ else:
     max_char_num_in_tok = get_max_char_num_in_word(short_train_data + short_valid_data)
 
 
-# In[19]:
+# In[ ]:
 
 
 if use_bert:
@@ -406,7 +389,7 @@ else:
                                                                   max_char_num_in_tok)
 
 
-# In[20]:
+# In[ ]:
 
 
 
@@ -426,7 +409,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
                          )
 
 
-# In[21]:
+# In[ ]:
 
 
 # # have a look at dataloader
@@ -453,7 +436,7 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 
 # # Model
 
-# In[22]:
+# In[ ]:
 
 
 if char_encoder_config is not None:
@@ -478,7 +461,7 @@ ent_extractor = ent_extractor.to(device)
 
 # # Metrics
 
-# In[23]:
+# In[ ]:
 
 
 metrics = Metrics(handshaking_tagger)
@@ -487,7 +470,7 @@ metrics4valid = Metrics(handshaking_tagger4valid)
 
 # # Train
 
-# In[24]:
+# In[ ]:
 
 
 # train step
@@ -584,7 +567,7 @@ def valid_step(valid_data):
     return sample_acc.item(), correct_num, pred_num, gold_num
 
 
-# In[25]:
+# In[ ]:
 
 
 max_f1 = 0.
@@ -664,7 +647,7 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
         print("Current valid_f1: {}, Best f1: {}".format(valid_f1, max_f1))
 
 
-# In[26]:
+# In[ ]:
 
 
 # optimizer 
