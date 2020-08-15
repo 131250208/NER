@@ -1,7 +1,7 @@
 experiment_name: genia
-run_name: cat_p+bilstm
+run_name: cln_p+bioL
 
-data_home: ../data/bilstm
+data_home: ../data/biobert-large-cased-pubmed-58k
 # # biobert-large-cased-pubmed-58k
 # # bert-large-cased
 # # bert-base-cased
@@ -14,7 +14,7 @@ meta: meta.json
 word2idx: word2idx.json
 char2idx: char2idx.json
  
-device_num: 3
+device_num: 1
 
 wandb: true
 path_to_save_model: ../model_state
@@ -22,8 +22,8 @@ path_to_save_model: ../model_state
 hyper_parameters:
  # >>>>>>>>>Preprocessing>>>>>>>>>>>
 #  token_type: subword
- max_seq_len: 150
- pred_max_seq_len: 150
+ max_seq_len: 128
+ pred_max_seq_len: 128
  sliding_len: 20
  pred_sliding_len: 20
  
@@ -31,7 +31,7 @@ hyper_parameters:
  batch_size: 36
  parallel: false
  epochs: 100
- lr: 5e-4
+ lr: 2e-5
  seed: 2333
  log_interval: 10
  ## learning schedule
@@ -61,9 +61,9 @@ hyper_parameters:
    - 0.05
    - 0.
  ## bert: subword encoder
- use_bert: false
+ use_bert: true
  bert_config:
-  path: ../../pretrained_models/biobert_v1.0_pubmed_pmc # biobert_v1.0_pubmed_pmc
+  path: ../../pretrained_models/biobert-large-cased-pubmed-58k # biobert_v1.0_pubmed_pmc
   use_last_k_layers: 1
   finetune: true
  ## word encoder
@@ -83,7 +83,7 @@ hyper_parameters:
    - 0.
   freeze_word_emb: false
  ## flair
- use_flair: false
+ use_flair: true
  flair_embedding_ids:
   - pubmed-forward
   - pubmed-backward
@@ -93,7 +93,7 @@ hyper_parameters:
   shaking_type: cat_plus
   context_type: lstm
  ## encoding fc
- enc_hidden_size: 768
+ enc_hidden_size: 1024
  activate_enc_fc: false
  
 # when to save the model state dict
