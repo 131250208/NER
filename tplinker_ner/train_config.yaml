@@ -90,7 +90,7 @@ hyper_parameters:
  ## handshaking kernel
  handshaking_kernel_config:
   visual_field: -1 # -1: use recommended value
-  shaking_type: cat_plus
+  shaking_type: cln_plus
   context_type: lstm
  ## encoding fc
  enc_hidden_size: 1024
