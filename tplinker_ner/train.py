@@ -35,7 +35,6 @@ from tplinker_ner import (HandshakingTaggingScheme,
                           Metrics)
 import json
 import wandb
-import word2vec
 import numpy as np
 
 
@@ -80,7 +79,6 @@ max_seq_len = hyper_parameters["max_seq_len"]
 pred_max_seq_len = hyper_parameters["pred_max_seq_len"]
 sliding_len = hyper_parameters["sliding_len"]
 pred_sliding_len = hyper_parameters["pred_sliding_len"]
-token_type = hyper_parameters["token_type"]
 
 # >>>>>>>>>>>>>train config>>>>>>>>>>
 ## for reproductivity
@@ -102,20 +100,23 @@ char_encoder_config = {
     "emb_dropout": hyper_parameters["char_emb_dropout"],
     "bilstm_layers": hyper_parameters["char_bilstm_layers"],
     "bilstm_dropout": hyper_parameters["char_bilstm_dropout"],
-}
+} if hyper_parameters["use_char_encoder"] else None
 ## bert encoder
 bert_config = {
     "path": hyper_parameters["bert_path"],
     "fintune": hyper_parameters["bert_finetune"],
     "use_last_k_layers": hyper_parameters["use_last_k_bert_layers"],
 } if hyper_parameters["use_bert"] else None
+use_bert = hyper_parameters["use_bert"]
+
 ## word encoder
 word_encoder_config = {
+    "emb_key": hyper_parameters["word_emb_key"],
     "emb_dropout": hyper_parameters["word_emb_dropout"],
     "bilstm_layers": hyper_parameters["word_bilstm_layers"],
     "bilstm_dropout": hyper_parameters["word_bilstm_dropout"],
     "freeze_word_emb": hyper_parameters["freeze_word_emb"],
-}
+} if hyper_parameters["use_word_encoder"] else None
 ## flair config
 flair_config = {
     "embedding_ids": hyper_parameters["flair_embedding_ids"],
@@ -157,11 +158,13 @@ valid_data = json.load(open(valid_data_path, "r", encoding = "utf-8"))
 
 
 # init tokenizers
-bert_tokenizer = BertTokenizerFast.from_pretrained(bert_config["path"], add_special_tokens = False, do_lower_case = False)
+if use_bert:
+    bert_tokenizer = BertTokenizerFast.from_pretrained(bert_config["path"], add_special_tokens = False, do_lower_case = False)
 word2idx = json.load(open(word2idx_path, "r", encoding = "utf-8"))
 word_tokenizer = WordTokenizer(word2idx)
 
-preprocessor = Preprocessor(bert_tokenizer, token_type) if token_type == "subword" else Preprocessor(word_tokenizer, token_type)
+tokenizer4preprocess = bert_tokenizer if use_bert else word_tokenizer
+preprocessor = Preprocessor(tokenizer4preprocess, use_bert)
 
 
 # In[7]:
@@ -308,8 +311,12 @@ def text2char_indices(text, max_seq_len = -1):
 # In[14]:
 
 
-data_maker = DataMaker(handshaking_tagger, word_tokenizer, bert_tokenizer, text2char_indices)
-data_maker4valid = DataMaker(handshaking_tagger4valid, word_tokenizer, bert_tokenizer, text2char_indices)
+if use_bert:
+    data_maker = DataMaker(handshaking_tagger, word_tokenizer, text2char_indices, bert_tokenizer)
+    data_maker4valid = DataMaker(handshaking_tagger4valid, word_tokenizer, text2char_indices, bert_tokenizer)
+else:
+    data_maker = DataMaker(handshaking_tagger, word_tokenizer, text2char_indices)
+    data_maker4valid = DataMaker(handshaking_tagger4valid, word_tokenizer, text2char_indices)
 
 
 # In[15]:
@@ -330,18 +337,20 @@ class MyDataset(Dataset):
 
 
 # max word num, max subword num, max char num
-def cal_max_seq_len(data):
-    max_char_num, max_word_num, max_subword_num = 0, 0, 0
+def cal_max_tok_num(data, tokenizer):
+    max_tok_num = 0
     for example in data:
         text = example["text"]
-        max_word_num = max(max_word_num, len(word_tokenizer.tokenize(text)))
-        max_subword_num = max(max_subword_num, len(bert_tokenizer.tokenize(text)))
-    return max_word_num, max_subword_num
+        max_tok_num = max(max_tok_num, len(tokenizer.tokenize(text)))
+    return max_tok_num
 
-max_word_num_train, max_subword_num_train = cal_max_seq_len(short_train_data)
-print("max_word_num_train: {}, max_subword_num_train: {}".format(max_word_num_train, max_subword_num_train))
-max_word_num_valid, max_subword_num_valid = cal_max_seq_len(short_valid_data)
-print("max_word_num_val: {}, max_subword_num_val: {}".format(max_word_num_valid, max_subword_num_valid))
+max_word_num_train = cal_max_tok_num(short_train_data, word_tokenizer)
+max_word_num_valid = cal_max_tok_num(short_valid_data, word_tokenizer)
+print("max_word_num_train: {}, max_word_num_val: {}".format(max_word_num_train, max_word_num_valid))
+if use_bert:
+    max_subword_num_train = cal_max_tok_num(short_train_data, bert_tokenizer)
+    max_subword_num_valid = cal_max_tok_num(short_valid_data, bert_tokenizer)
+    print("max_subword_num_train: {}, max_subword_num_val: {}".format(max_subword_num_train, max_subword_num_valid))
 
 
 # In[17]:
@@ -370,26 +379,35 @@ def get_max_char_num_in_word(data):
 # In[18]:
 
 
-if token_type == "word":
-    max_char_num_in_tok = get_max_char_num_in_word(short_train_data + short_valid_data)
-elif token_type == "subword":
+if use_bert:
     max_char_num_in_tok = get_max_char_num_in_subword(short_train_data + short_valid_data)
+else:
+    max_char_num_in_tok = get_max_char_num_in_word(short_train_data + short_valid_data)
 
 
 # In[19]:
 
 
-indexed_train_sample_list = data_maker.get_indexed_data(short_train_data,
-                                                        max_word_num_train,
-                                                        max_subword_num_train, 
-                                                        max_char_num_in_tok)
-indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data,
-                                                              max_word_num_valid,
-                                                              max_subword_num_valid, 
-                                                              max_char_num_in_tok)
+if use_bert:
+    indexed_train_sample_list = data_maker.get_indexed_data(short_train_data,
+                                                            max_word_num_train,
+                                                            max_char_num_in_tok, 
+                                                            max_subword_num_train)
+    indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data,
+                                                                  max_word_num_valid,
+                                                                  max_char_num_in_tok, 
+                                                                  max_subword_num_valid)
+else:
+    indexed_train_sample_list = data_maker.get_indexed_data(short_train_data,
+                                                            max_word_num_train,
+                                                            max_char_num_in_tok)
+    indexed_valid_sample_list = data_maker4valid.get_indexed_data(short_valid_data,
+                                                                  max_word_num_valid,
+                                                                  max_char_num_in_tok)
 
 
 # In[20]:
+
 
 
 train_dataloader = DataLoader(MyDataset(indexed_train_sample_list), 
@@ -397,14 +415,14 @@ train_dataloader = DataLoader(MyDataset(indexed_train_sample_list),
                                   shuffle = True, 
                                   num_workers = 6,
                                   drop_last = False,
-                                  collate_fn = data_maker.generate_batch,
+                                  collate_fn = lambda batch_data: data_maker.generate_batch(batch_data, use_bert = use_bert),
                                  )
 valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list), 
                           batch_size = batch_size, 
                           shuffle = False, 
                           num_workers = 6,
                           drop_last = False,
-                          collate_fn = data_maker4valid.generate_batch,
+                          collate_fn = lambda batch_data: data_maker4valid.generate_batch(batch_data, use_bert = use_bert),
                          )
 
 
@@ -433,81 +451,24 @@ valid_dataloader = DataLoader(MyDataset(indexed_valid_sample_list),
 # print(batch_shaking_tag.size())
 
 
+# # Model
+
 # In[22]:
 
 
-
-
-
-# init embedding
-# transformers_embedding =  TransformerWordEmbeddings('bert-base-uncased')
-
-
-# In[23]:
-
-
-# word_embedding = WordEmbeddings("glove")
-
-# # create a sentence
-# sentence = Sentence('The grass is green . [PAD]')
-
-# # embed words in sentence
-# stacked_embeddings.embed(sentence)
-
-
-# In[24]:
-
-
-# for token in sentence:
-#     print(token)
-#     print(token.embedding)
-#     print(token.embedding.size())
-
-
-# # Model
-
-# In[25]:
-
-
-# df = pd.read_csv('../../pretrained_emb/glove/glove.6B.100d.txt', sep=" ", quoting = 3, header = None, index_col = 0)
-# glove = {key: val.values for key, val in df.T.items()}
-
-
-# In[26]:
-
-
-# init word embedding
-print("Loading pretrained word embeddings...")
-pretrained_emb = word2vec.load('../../pretrained_emb/bio_nlp_vec/PubMed-shuffle-win-30.bin')
-
-
-# In[27]:
-
-
-init_word_embedding_matrix = np.random.normal(-0.5, 0.5, size=(len(word2idx), 200))
-hit_count = 0
-for word, idx in tqdm(word2idx.items(), desc = "Init word embedding matrix"):
-    if word in pretrained_emb:
-        hit_count += 1
-        init_word_embedding_matrix[idx] = pretrained_emb[word]
-print("pretrained word embedding hit rate: {}".format(hit_count / len(word2idx)))
-init_word_embedding_matrix = torch.FloatTensor(init_word_embedding_matrix)
-
-
-# In[28]:
-
-
-char_encoder_config["char_size"] = len(char2idx)
-char_encoder_config["max_char_num_in_tok"] = max_char_num_in_tok
-word_encoder_config["init_word_embedding_matrix"] = init_word_embedding_matrix
+if char_encoder_config is not None:
+    char_encoder_config["char_size"] = len(char2idx)
+    char_encoder_config["max_char_num_in_tok"] = max_char_num_in_tok
+if word_encoder_config is not None:
+    word_encoder_config["word2idx"] = word2idx
 ent_extractor = TPLinkerNER(char_encoder_config,
-                            bert_config,
                             word_encoder_config,
                             flair_config,
                             handshaking_kernel_config,
                             enc_hidden_size,
                             activate_enc_fc,
                             len(tags),
+                            bert_config,
                             )
 
 if parallel:
@@ -517,7 +478,7 @@ ent_extractor = ent_extractor.to(device)
 
 # # Metrics
 
-# In[29]:
+# In[23]:
 
 
 metrics = Metrics(handshaking_tagger)
@@ -526,34 +487,44 @@ metrics4valid = Metrics(handshaking_tagger4valid)
 
 # # Train
 
-# In[30]:
+# In[24]:
 
 
 # train step
 def train_step(train_data, optimizer):
     ent_extractor.train()
     
-    sample_list,     padded_sent_list,     batch_subword_input_ids,     batch_attention_mask,     batch_token_type_ids,     subword2char_span_list,     batch_char_input_ids4subword,     batch_word_input_ids,     batch_subword2word_idx_map,     batch_gold_shaking_tag = train_data
+    if bert_config is not None:
+        sample_list,         padded_sent_list,         batch_subword_input_ids,         batch_attention_mask,         batch_token_type_ids,         tok2char_span_list,         batch_char_input_ids4subword,         batch_word_input_ids,         batch_subword2word_idx_map,         batch_gold_shaking_tag = train_data
+    else:
+        sample_list,         padded_sent_list,         batch_char_input_ids4subword,         batch_word_input_ids,         tok2char_span_list,         batch_gold_shaking_tag = train_data
     
-    batch_char_input_ids4subword,     batch_subword_input_ids,     batch_attention_mask,     batch_token_type_ids,     batch_word_input_ids,     batch_subword2word_idx_map,     batch_gold_shaking_tag = (batch_char_input_ids4subword.to(device), 
-                              batch_subword_input_ids.to(device), 
-                              batch_attention_mask.to(device), 
-                              batch_token_type_ids.to(device), 
+    batch_char_input_ids4subword,     batch_word_input_ids,     batch_gold_shaking_tag = (batch_char_input_ids4subword.to(device), 
                               batch_word_input_ids.to(device),
-                              batch_subword2word_idx_map.to(device),
-                              batch_gold_shaking_tag.to(device), 
+                              batch_gold_shaking_tag.to(device) 
                                  )
+    if bert_config is not None:
+            batch_subword_input_ids,             batch_attention_mask,             batch_token_type_ids,             batch_subword2word_idx_map = (batch_subword_input_ids.to(device), 
+                                          batch_attention_mask.to(device), 
+                                          batch_token_type_ids.to(device), 
+                                          batch_subword2word_idx_map.to(device))
     
     # zero the parameter gradients
     optimizer.zero_grad()
     
-    batch_pred_shaking_outputs = ent_extractor(batch_char_input_ids4subword, 
-                                               batch_word_input_ids,
-                                               padded_sent_list,
-                                               batch_subword_input_ids, 
-                                               batch_attention_mask, 
-                                               batch_token_type_ids, 
-                                               batch_subword2word_idx_map)
+    if bert_config is not None:
+        batch_pred_shaking_outputs = ent_extractor(batch_char_input_ids4subword, 
+                                                   batch_word_input_ids,
+                                                   padded_sent_list,
+                                                   batch_subword_input_ids, 
+                                                   batch_attention_mask, 
+                                                   batch_token_type_ids, 
+                                                   batch_subword2word_idx_map)
+    else:
+        batch_pred_shaking_outputs = ent_extractor(batch_char_input_ids4subword, 
+                                                   batch_word_input_ids,
+                                                   padded_sent_list
+                                                   )
     
                 
 #     set_trace()
@@ -574,36 +545,46 @@ def train_step(train_data, optimizer):
 def valid_step(valid_data):
     ent_extractor.eval()
 
-    sample_list,     padded_sent_list,     batch_subword_input_ids,     batch_attention_mask,     batch_token_type_ids,     subword2char_span_list,     batch_char_input_ids4subword,     batch_word_input_ids,     batch_subword2word_idx_map,     batch_gold_shaking_tag = valid_data
+    if bert_config is not None:
+        sample_list,         padded_sent_list,         batch_subword_input_ids,         batch_attention_mask,         batch_token_type_ids,         tok2char_span_list,         batch_char_input_ids4subword,         batch_word_input_ids,         batch_subword2word_idx_map,         batch_gold_shaking_tag = valid_data
+    else:
+        sample_list,         padded_sent_list,         batch_char_input_ids4subword,         batch_word_input_ids,         tok2char_span_list,         batch_gold_shaking_tag = valid_data
     
-    batch_char_input_ids4subword,     batch_subword_input_ids,     batch_attention_mask,     batch_token_type_ids,     batch_word_input_ids,     batch_subword2word_idx_map,     batch_gold_shaking_tag = (batch_char_input_ids4subword.to(device), 
-                              batch_subword_input_ids.to(device), 
-                              batch_attention_mask.to(device), 
-                              batch_token_type_ids.to(device), 
+    batch_char_input_ids4subword,     batch_word_input_ids,     batch_gold_shaking_tag = (batch_char_input_ids4subword.to(device), 
                               batch_word_input_ids.to(device),
-                              batch_subword2word_idx_map.to(device),
-                              batch_gold_shaking_tag.to(device), 
+                              batch_gold_shaking_tag.to(device) 
                                  )
-
+    if bert_config is not None:
+            batch_subword_input_ids,             batch_attention_mask,             batch_token_type_ids,             batch_subword2word_idx_map = (batch_subword_input_ids.to(device), 
+                                          batch_attention_mask.to(device), 
+                                          batch_token_type_ids.to(device), 
+                                          batch_subword2word_idx_map.to(device))
+    
     with torch.no_grad():
-        batch_pred_shaking_outputs = ent_extractor(batch_char_input_ids4subword, 
-                                                   batch_word_input_ids,
-                                                   padded_sent_list,
-                                                   batch_subword_input_ids, 
-                                                   batch_attention_mask, 
-                                                   batch_token_type_ids, 
-                                                   batch_subword2word_idx_map)
+        if bert_config is not None:
+            batch_pred_shaking_outputs = ent_extractor(batch_char_input_ids4subword, 
+                                                       batch_word_input_ids,
+                                                       padded_sent_list,
+                                                       batch_subword_input_ids, 
+                                                       batch_attention_mask, 
+                                                       batch_token_type_ids, 
+                                                       batch_subword2word_idx_map)
+        else:
+            batch_pred_shaking_outputs = ent_extractor(batch_char_input_ids4subword, 
+                                                       batch_word_input_ids,
+                                                       padded_sent_list
+                                                       )
         
     batch_pred_shaking_tag = (batch_pred_shaking_outputs > 0.).long()
     
     sample_acc = metrics4valid.get_sample_accuracy(batch_pred_shaking_tag, batch_gold_shaking_tag)
-    correct_num, pred_num, gold_num = metrics4valid.get_ent_correct_pred_glod_num(sample_list, subword2char_span_list, 
+    correct_num, pred_num, gold_num = metrics4valid.get_ent_correct_pred_glod_num(sample_list, tok2char_span_list, 
                                                                                   batch_pred_shaking_tag)
     
     return sample_acc.item(), correct_num, pred_num, gold_num
 
 
-# In[31]:
+# In[25]:
 
 
 max_f1 = 0.
@@ -683,7 +664,7 @@ def train_n_valid(train_dataloader, dev_dataloader, optimizer, scheduler, num_ep
         print("Current valid_f1: {}, Best f1: {}".format(valid_f1, max_f1))
 
 
-# In[32]:
+# In[26]:
 
 
 # optimizer 

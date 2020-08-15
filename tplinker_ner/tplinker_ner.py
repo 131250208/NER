@@ -11,6 +11,9 @@ from torch.nn.parameter import Parameter
 from transformers import AutoModel
 from flair.data import Sentence
 from flair.embeddings import FlairEmbeddings, StackedEmbeddings
+import numpy as np
+import pandas as pd
+import word2vec
 
 class HandshakingTaggingScheme:
     def __init__(self, tags, max_seq_len, visual_field):
@@ -92,8 +95,8 @@ class HandshakingTaggingScheme:
 class DataMaker:
     def __init__(self, handshaking_tagger, 
                  word_tokenizer,
-                 subword_tokenizer,
-                 text2char_indices_func
+                 text2char_indices_func,
+                 subword_tokenizer = None
                  ):
         super().__init__()
         self.handshaking_tagger = handshaking_tagger
@@ -101,32 +104,65 @@ class DataMaker:
         self.subword_tokenizer = subword_tokenizer
         self.text2char_indices_func = text2char_indices_func
         
-    def get_indexed_data(self, data, max_word_num, max_subword_num, max_char_num_in_tok, data_type = "train"):
+    def get_indexed_data(self, data, max_word_num, max_char_num_in_tok, max_subword_num = None, data_type = "train"):
         '''
         indexing data
+        if max_subword_num is None: index data for TPLinkerNER_BERT
+        # use bert
+        indexed_sample = (sample, 
+                     subword_input_ids,
+                     attention_mask,
+                     token_type_ids,
+                     subword2char_span,
+                     char_input_ids_padded,
+                     word_input_ids,
+                     subword2word_idx_map,
+                     matrix_spots
+                    )
+        # do not use bert
+        indexed_sample = (sample, 
+                     char_input_ids_padded,
+                     word_input_ids,
+                     matrix_spots
+                    )
+        if data_type == "test", matrix_spots is not included
+        
         '''
-        indexed_samples = []
+        indexed_sample_list = []
+        
         for sample in tqdm(data, desc = "Generate indexed data"):
             text = sample["text"]
-            # codes for bert input
-            bert_codes = self.subword_tokenizer.encode_plus(text, 
-                                    return_offsets_mapping = True, 
-                                    add_special_tokens = False,
-                                    max_length = max_subword_num, 
-                                    truncation = True,
-                                    pad_to_max_length = True)
-        
-            # get bert codes
-            subword_input_ids = torch.tensor(bert_codes["input_ids"]).long()
-            attention_mask = torch.tensor(bert_codes["attention_mask"]).long()
-            token_type_ids = torch.tensor(bert_codes["token_type_ids"]).long()
-            subword2char_span = bert_codes["offset_mapping"]
-            
+            indexed_sample = {}
+            indexed_sample["sample"] = sample
+            if max_subword_num is not None:
+                # codes for bert input
+                bert_codes = self.subword_tokenizer.encode_plus(text, 
+                                        return_offsets_mapping = True, 
+                                        add_special_tokens = False,
+                                        max_length = max_subword_num, 
+                                        truncation = True,
+                                        pad_to_max_length = True)
+
+                # get bert codes
+                subword_input_ids = torch.tensor(bert_codes["input_ids"]).long()
+                attention_mask = torch.tensor(bert_codes["attention_mask"]).long()
+                token_type_ids = torch.tensor(bert_codes["token_type_ids"]).long()
+                subword2char_span = bert_codes["offset_mapping"]
+                
+                indexed_sample["subword_input_ids"] = subword_input_ids
+                indexed_sample["attention_mask"] = attention_mask
+                indexed_sample["token_type_ids"] = token_type_ids
+                indexed_sample["tok2char_span"] = subword2char_span
+
             # word level tokenizer
-            word_input_ids = self.word_tokenizer.text2word_indices(text, max_word_num)
-#             word_input_ids = word_codes["input_ids"]
-#             word2char_span = word_codes["offset_mapping"]
-            
+            if max_subword_num is not None:
+                word_input_ids = self.word_tokenizer.text2word_indices(text, max_word_num)
+            else:
+                word_codes = self.word_tokenizer.encode_plus(text, max_word_num)
+                word_input_ids = word_codes["input_ids"]
+                word2char_span = word_codes["offset_mapping"]
+                indexed_sample["tok2char_span"] = word2char_span
+                
             # char input ids
             char_input_ids = self.text2char_indices_func(text)
             def padding_char_input_ids(offset_mapping, max_char_num_in_tok):
@@ -138,118 +174,112 @@ class DataMaker:
                         char_ids.extend([0] * (max_char_num_in_tok - len(char_ids)))
                     char_input_ids_padded.extend(char_ids)
                 return torch.tensor(char_input_ids_padded).long()
-            char_input_ids4subword = padding_char_input_ids(subword2char_span, max_char_num_in_tok)
-#             char_input_ids4word = padding_char_input_ids(word2char_span, max_char_num_in_word)
-            
-#             # word2subword_span
-#             words = self.word_tokenizer.tokenize(text)
-#             word2subword_span = []
-#             subword_num = 0
-#             for wd in words:
-#                 word2subword_span.append([subword_num, subword_num + len(self.subword_tokenizer.tokenize(wd))])
-#             if len(word2subword_span) < max_word_num:
-#                 word2subword_span.extend([0, 0] * (max_word_num - len(word2subword_span)))
-#             if max_word_num != -1:
-#                 word2subword_span = word2subword_span[:max_word_num]
+            if max_subword_num is not None:
+                char_input_ids_padded = padding_char_input_ids(subword2char_span, max_char_num_in_tok)
+            else:
+                char_input_ids_padded = padding_char_input_ids(word2char_span, max_char_num_in_tok)
                 
-            # word_input_ids_repeat
-            words = self.word_tokenizer.tokenize(text)
-            subword2word_idx_map = []
-            for wd_idx, wd in enumerate(words):
-                for subwd in self.subword_tokenizer.tokenize(wd):
-                    if subwd != "[PAD]":
-                        subword2word_idx_map.append(wd_idx)
-            if len(subword2word_idx_map) < max_subword_num:
-                subword2word_idx_map.extend([len(words) - 1] * (max_subword_num - len(subword2word_idx_map)))
-            subword2word_idx_map = torch.tensor(subword2word_idx_map).long()
+            indexed_sample["char_input_ids_padded"] = char_input_ids_padded
+            indexed_sample["word_input_ids"] = word_input_ids
             
+            if max_subword_num is not None:
+                # subword2word_idx_map: map subword to corresponding word
+                words = self.word_tokenizer.tokenize(text)
+                subword2word_idx_map = []
+                for wd_idx, wd in enumerate(words):
+                    for subwd in self.subword_tokenizer.tokenize(wd):
+                        if subwd != "[PAD]":
+                            subword2word_idx_map.append(wd_idx)
+                if len(subword2word_idx_map) < max_subword_num:
+                    subword2word_idx_map.extend([len(words) - 1] * (max_subword_num - len(subword2word_idx_map)))
+                subword2word_idx_map = torch.tensor(subword2word_idx_map).long()
+                indexed_sample["subword2word_idx_map"] = subword2word_idx_map
             
             # get spots
-            matrix_spots = None
             if data_type != "test":
                 matrix_spots = self.handshaking_tagger.get_spots(sample)
-                
-            sample_tp = (sample, 
-                     subword_input_ids,
-                     attention_mask,
-                     token_type_ids,
-                     subword2char_span,
-                     char_input_ids4subword,
-                     word_input_ids,
-                     subword2word_idx_map,
-#                      char_input_ids4word, 
-                     matrix_spots
-                    )
-            indexed_samples.append(sample_tp)       
-        return indexed_samples
+                indexed_sample["matrix_spots"] = matrix_spots
+            
+            indexed_sample_list.append(indexed_sample)       
+        return indexed_sample_list
     
-    def generate_batch(self, batch_data, data_type = "train"):
+    def generate_batch(self, batch_data, use_bert = True, data_type = "train"):
         sample_list = []
         subword_input_ids_list = []
         attention_mask_list = []
         token_type_ids_list = [] 
-        subword2char_span_list = []
-        char_input_ids4subword_list = []
+        tok2char_span_list = []
+        char_input_ids_padded_list = []
         word_input_ids_list = []
         padded_sent_list = []
         subword2word_idx_map_list = []
         matrix_spots_batch = []
         
-        
-        for tp in batch_data:
-            sample_list.append(tp[0])
-            subword_input_ids_list.append(tp[1])
-            attention_mask_list.append(tp[2])        
-            token_type_ids_list.append(tp[3])  
-            subword2char_span_list.append(tp[4])
-            char_input_ids4subword_list.append(tp[5])
-            word_input_ids_list.append(tp[6])
+        for dt in batch_data:
+            sample_list.append(dt["sample"])
+            if use_bert:
+                subword_input_ids_list.append(dt["subword_input_ids"])
+                attention_mask_list.append(dt["attention_mask"])        
+                token_type_ids_list.append(dt["token_type_ids"])  
+                subword2word_idx_map_list.append(dt["subword2word_idx_map"])
+            char_input_ids_padded_list.append(dt["char_input_ids_padded"])
+            word_input_ids_list.append(dt["word_input_ids"])
+            tok2char_span_list.append(dt["tok2char_span"])
             # flair embeddings
-            max_word_num = tp[6].size()[0]
-            text = tp[0]["text"]
+            max_word_num = dt["word_input_ids"].size()[0]
+            text = dt["sample"]["text"]
             words = text.split(" ")
             words.extend(["[PAD]"] * (max_word_num - len(words)))
             sent = " ".join(words)
             padded_sent_list.append(Sentence(sent))
-            
-            subword2word_idx_map_list.append(tp[7])
-            if data_type != "test":
-                matrix_spots_batch.append(tp[8])
 
-        batch_subword_input_ids = torch.stack(subword_input_ids_list, dim = 0)
-        batch_attention_mask = torch.stack(attention_mask_list, dim = 0)
-        batch_token_type_ids = torch.stack(token_type_ids_list, dim = 0)
+            if data_type != "test":
+                matrix_spots_batch.append(dt["matrix_spots"])
         
-        batch_char_input_ids4subword = torch.stack(char_input_ids4subword_list, dim = 0)
+        if use_bert:
+            batch_subword_input_ids = torch.stack(subword_input_ids_list, dim = 0)
+            batch_attention_mask = torch.stack(attention_mask_list, dim = 0)
+            batch_token_type_ids = torch.stack(token_type_ids_list, dim = 0)
+            batch_subword2word_idx_map = torch.stack(subword2word_idx_map_list, dim = 0)
+        
+        batch_char_input_ids_padded = torch.stack(char_input_ids_padded_list, dim = 0)
         batch_word_input_ids = torch.stack(word_input_ids_list, dim = 0)
-        batch_subword2word_idx_map = torch.stack(subword2word_idx_map_list, dim = 0)
+        
         
         batch_shaking_tag = None
         if data_type != "test":
             batch_shaking_tag = self.handshaking_tagger.spots2shaking_tag4batch(matrix_spots_batch)
 
-        return sample_list, \
-            padded_sent_list, \
-            batch_subword_input_ids, \
-            batch_attention_mask, \
-            batch_token_type_ids, \
-            subword2char_span_list, \
-            batch_char_input_ids4subword, \
-            batch_word_input_ids, \
-            batch_subword2word_idx_map, \
-            batch_shaking_tag
+        if use_bert:
+            return sample_list, \
+                padded_sent_list, \
+                batch_subword_input_ids, \
+                batch_attention_mask, \
+                batch_token_type_ids, \
+                tok2char_span_list, \
+                batch_char_input_ids_padded, \
+                batch_word_input_ids, \
+                batch_subword2word_idx_map, \
+                batch_shaking_tag
+        else:
+            return sample_list, \
+                padded_sent_list, \
+                batch_char_input_ids_padded, \
+                batch_word_input_ids, \
+                tok2char_span_list, \
+                batch_shaking_tag
     
 
 class TPLinkerNER(nn.Module):
     def __init__(self, 
              char_encoder_config,
-             bert_config,
              word_encoder_config,
              flair_config,
              handshaking_kernel_config,
              hidden_size,
              activate_enc_fc,
-             entity_type_num):
+             entity_type_num,
+             bert_config):
         super().__init__()
         '''
         char_encoder_config = {
@@ -279,41 +309,67 @@ class TPLinkerNER(nn.Module):
             "visual_field": visual_field, # 
         }
         '''
-
-        # char encoder
-        char_size = char_encoder_config["char_size"]
-        char_emb_dim = char_encoder_config["emb_dim"]
-        char_emb_dropout = char_encoder_config["emb_dropout"]
-        char_bilstm_layers = char_encoder_config["bilstm_layers"]
-        char_bilstm_dropout = char_encoder_config["bilstm_dropout"]
-        max_char_num_in_subword = char_encoder_config["max_char_num_in_tok"]
-        self.char_emb = nn.Embedding(char_size, char_emb_dim)
-        self.char_emb_dropout = nn.Dropout(p = char_emb_dropout)
-        self.char_lstm = nn.LSTM(char_emb_dim, 
-                       char_emb_dim // 2, 
-                       num_layers = char_bilstm_layers, 
-                       dropout = char_bilstm_dropout,
-                       bidirectional = True,
-                       batch_first = True)
-        self.char_cnn = nn.Conv1d(char_emb_dim, char_emb_dim, max_char_num_in_subword, stride = max_char_num_in_subword)
+        combined_hidden_size = 0
+        self.char_encoder_config = char_encoder_config
+        if char_encoder_config is not None:
+            # char encoder
+            char_size = char_encoder_config["char_size"]
+            char_emb_dim = char_encoder_config["emb_dim"]
+            char_emb_dropout = char_encoder_config["emb_dropout"]
+            char_bilstm_layers = char_encoder_config["bilstm_layers"]
+            char_bilstm_dropout = char_encoder_config["bilstm_dropout"]
+            max_char_num_in_subword = char_encoder_config["max_char_num_in_tok"]
+            self.char_emb = nn.Embedding(char_size, char_emb_dim)
+            self.char_emb_dropout = nn.Dropout(p = char_emb_dropout)
+            self.char_lstm = nn.LSTM(char_emb_dim, 
+                           char_emb_dim // 2, 
+                           num_layers = char_bilstm_layers, 
+                           dropout = char_bilstm_dropout,
+                           bidirectional = True,
+                           batch_first = True)
+            self.char_cnn = nn.Conv1d(char_emb_dim, char_emb_dim, max_char_num_in_subword, stride = max_char_num_in_subword)
+            combined_hidden_size += char_emb_dim
         
         # word encoder
-        init_word_embedding_matrix = word_encoder_config["init_word_embedding_matrix"]
-        word_emb_dropout = word_encoder_config["emb_dropout"]
-        word_bilstm_layers = word_encoder_config["bilstm_layers"]
-        word_bilstm_dropout = word_encoder_config["bilstm_dropout"]
-        freeze_word_emb = word_encoder_config["freeze_word_emb"]
-        self.word_emb = nn.Embedding.from_pretrained(init_word_embedding_matrix, freeze = freeze_word_emb)
-        self.word_emb_dropout = nn.Dropout(p = word_emb_dropout)
-        word_emb_dim = init_word_embedding_matrix.size()[-1]
-        self.word_lstm = nn.LSTM(word_emb_dim, 
-                         word_emb_dim // 2, 
-                         num_layers = word_bilstm_layers,
-                         dropout = word_bilstm_dropout,
-                         bidirectional = True,
-                         batch_first = True)
+        ## init word embedding
+        self.word_encoder_config = word_encoder_config
+        if word_encoder_config is not None:
+            word2idx = word_encoder_config["word2idx"]
+            word_size = len(word2idx)
+            word_emb_key = word_encoder_config["emb_key"]
+            word_emb_dropout = word_encoder_config["emb_dropout"]
+            word_bilstm_layers = word_encoder_config["bilstm_layers"]
+            word_bilstm_dropout = word_encoder_config["bilstm_dropout"]
+            freeze_word_emb = word_encoder_config["freeze_word_emb"]
+
+            print("Loading pretrained word embeddings...")
+            if word_emb_key == "glove":
+                glove_df = pd.read_csv('../../pretrained_emb/glove/glove.6B.100d.txt', sep=" ", quoting = 3, header = None, index_col = 0)
+                pretrained_emb = {key: val.values for key, val in glove_df.T.items()}
+                word_emb_dim = len(list(pretrained_emb.values())[0])
+            elif word_emb_key == "pubmed":
+                pretrained_emb = word2vec.load('../../pretrained_emb/bio_nlp_vec/PubMed-shuffle-win-30.bin')
+                word_emb_dim = len(pretrained_emb.vectors[0])
+            init_word_embedding_matrix = np.random.normal(-0.5, 0.5, size=(word_size, word_emb_dim))
+            hit_count = 0
+            for word, idx in tqdm(word2idx.items(), desc = "Init word embedding matrix"):
+                if word in pretrained_emb:
+                    hit_count += 1
+                    init_word_embedding_matrix[idx] = pretrained_emb[word]
+            print("pretrained word embedding hit rate: {}".format(hit_count / word_size))
+            init_word_embedding_matrix = torch.FloatTensor(init_word_embedding_matrix)
+
+            ## word encoder model
+            self.word_emb = nn.Embedding.from_pretrained(init_word_embedding_matrix, freeze = freeze_word_emb)
+            self.word_emb_dropout = nn.Dropout(p = word_emb_dropout)
+            self.word_lstm = nn.LSTM(word_emb_dim, 
+                             word_emb_dim // 2, 
+                             num_layers = word_bilstm_layers,
+                             dropout = word_bilstm_dropout,
+                             bidirectional = True,
+                             batch_first = True)
+            combined_hidden_size += word_emb_dim
         
-        combined_hidden_size = word_emb_dim + char_emb_dim
         
         # bert 
         self.bert_config = bert_config
@@ -350,45 +406,51 @@ class TPLinkerNER(nn.Module):
         
     def forward(self, char_input_ids, 
                 word_input_ids, 
-                padded_sents = None, 
+                padded_sents, 
                 subword_input_ids = None, 
                 attention_mask = None, 
                 token_type_ids = None, 
                 subword2word_idx = None):
-        if self.bert_config is not None:
-            # subword_input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
-            context_outputs = self.bert(subword_input_ids, attention_mask, token_type_ids)
-            # last_hidden_state: (batch_size, seq_len, hidden_size)
-            hidden_states = context_outputs[2]
-            subword_hiddens = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_bert:], dim = 0), dim = 0)
         
-        # char_input_ids: (batch_size, seq_len * max_char_num_in_subword)
-        # char_input_emb/char_hiddens: (batch_size, seq_len * max_char_num_in_subword, char_emb_dim)
-        # char_conv_output: (batch_size, seq_len, char_emb_dim)
-        char_input_emb = self.char_emb(char_input_ids)
-        char_input_emb = self.char_emb_dropout(char_input_emb)
-        char_hiddens, _ = self.char_lstm(char_input_emb)
-        char_conv_output = self.char_cnn(char_hiddens.permute(0, 2, 1)).permute(0, 2, 1)
+        # features
+        features = []
+        if self.char_encoder_config is not None:
+            # char_input_ids: (batch_size, seq_len * max_char_num_in_subword)
+            # char_input_emb/char_hiddens: (batch_size, seq_len * max_char_num_in_subword, char_emb_dim)
+            # char_conv_oudtut: (batch_size, seq_len, char_emb_dim)
+            char_input_emb = self.char_emb(char_input_ids)
+            char_input_emb = self.char_emb_dropout(char_input_emb)
+            char_hiddens, _ = self.char_lstm(char_input_emb)
+            char_conv_oudtut = self.char_cnn(char_hiddens.permute(0, 2, 1)).permute(0, 2, 1)
+            features.append(char_conv_oudtut)
         
-        # word_input_ids: (batch_size, seq_len)
-        # word_input_emb/word_hiddens: batch_size, seq_len, word_emb_dim)
-        word_input_emb = self.word_emb(word_input_ids)
-        word_input_emb = self.word_emb_dropout(word_input_emb)
-        word_hiddens, _ = self.word_lstm(word_input_emb)
-
+        if self.word_encoder_config is not None:
+            # word_input_ids: (batch_size, seq_len)
+            # word_input_emb/word_hiddens: batch_size, seq_len, word_emb_dim)
+            word_input_emb = self.word_emb(word_input_ids)
+            word_input_emb = self.word_emb_dropout(word_input_emb)
+            word_hiddens, _ = self.word_lstm(word_input_emb)
+            if self.bert_config is not None:
+                # chose and repeat word hiddens, to align with subword num
+                word_hiddens = torch.gather(word_hiddens, 1, subword2word_idx[:,:,None].repeat(1, 1, word_hiddens.size()[-1]))
+            features.append(word_hiddens)
+            
         # cat word embeddings and flair embeddings 
         if self.flair_config is not None:
             self.stacked_flair_embeddings_model.embed(padded_sents)
             flair_embeddings = torch.stack([torch.stack([tok.embedding for tok in sent]) for sent in padded_sents])
-            word_hiddens = torch.cat([word_hiddens, flair_embeddings], dim = -1)
-        
-        # features
-        features = [char_conv_output, word_hiddens]
-        
-        # chose and repeat word hiddens, to align with subword num
+            if self.bert_config is not None:
+                # chose and repeat word hiddens, to align with subword num
+                flair_embeddings = torch.gather(flair_embeddings, 1, subword2word_idx[:,:,None].repeat(1, 1, flair_embeddings.size()[-1]))
+            features.append(flair_embeddings)
+     
         if self.bert_config is not None:
-            word_chosen_hiddens = torch.gather(word_hiddens, 1, subword2word_idx[:,:,None].repeat(1, 1, word_hiddens.size()[-1]))
-            features = [char_conv_output, subword_hiddens, word_chosen_hiddens]
+            # subword_input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
+            context_oudtuts = self.bert(subword_input_ids, attention_mask, token_type_ids)
+            # last_hidden_state: (batch_size, seq_len, hidden_size)
+            hidden_states = context_oudtuts[2]
+            subword_hiddens = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_bert:], dim = 0), dim = 0)
+            features.append(subword_hiddens)
             
         # combine features
         combined_hiddens = self.enc_fc(torch.cat(features, dim = -1))
@@ -399,10 +461,10 @@ class TPLinkerNER(nn.Module):
         # shaking_seq_len: max_seq_len * vf - sum(1, vf)
         shaking_hiddens = self.handshaking_kernel(combined_hiddens)
         
-        # ent_shaking_outputs: (batch_size, shaking_seq_len, entity_type_num)
-        ent_shaking_outputs = self.dec_fc(shaking_hiddens)
+        # ent_shaking_oudtuts: (batch_size, shaking_seq_len, entity_type_num)
+        ent_shaking_oudtuts = self.dec_fc(shaking_hiddens)
 
-        return ent_shaking_outputs
+        return ent_shaking_oudtuts
     
 class Metrics:
     def __init__(self, handshaking_tagger):
@@ -460,8 +522,8 @@ class Metrics:
              1 tags positive classes，0 tags negtive classes(means tok-pair does not have this type of link).
         """
         y_pred = (1 - 2 * y_true) * y_pred # -1 -> pos classes, 1 -> neg classes
-        y_pred_neg = y_pred - y_true * 1e12 # mask the pred outputs of pos classes
-        y_pred_pos = y_pred - (1 - y_true) * 1e12 # mask the pred outputs of neg classes
+        y_pred_neg = y_pred - y_true * 1e12 # mask the pred oudtuts of pos classes
+        y_pred_pos = y_pred - (1 - y_true) * 1e12 # mask the pred oudtuts of neg classes
         zeros = torch.zeros_like(y_pred[..., :1]) # st - st
         y_pred_neg = torch.cat([y_pred_neg, zeros], dim = -1)
         y_pred_pos = torch.cat([y_pred_pos, zeros], dim = -1)

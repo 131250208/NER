@@ -37,7 +37,7 @@ class WordTokenizer:
             word2char_span.append([char_num, char_num + len(wd)])
             char_num += len(wd) + 1 # +1: whitespace
         if len(word2char_span) < max_length:
-            word2char_span.extend([0, 0] * (max_length - len(word2char_span)))
+            word2char_span.extend([[0, 0]] * (max_length - len(word2char_span)))
         if max_length != -1:
             word2char_span = word2char_span[:max_length]
         return word2char_span
@@ -49,20 +49,20 @@ class WordTokenizer:
         }
 
 class Preprocessor:
-    def __init__(self, tokenizer, token_type):
+    def __init__(self, tokenizer, for_bert):
         '''
         if token_type == "subword", tokenizer must be set to bert encoder
         "word", word tokenizer
         '''
-        if token_type == "word":
-            self.tokenize = tokenizer.tokenize
-            self.get_tok2char_span_map = lambda text: tokenizer.get_word2char_span_map(text)
-            
-        elif token_type == "subword":
+        self.for_bert = for_bert
+        if for_bert:
             self.tokenize = tokenizer.tokenize
             self.get_tok2char_span_map = lambda text: tokenizer.encode_plus(text, 
                                                        return_offsets_mapping = True, 
                                                        add_special_tokens = False)["offset_mapping"]
+        else:
+            self.tokenize = tokenizer.tokenize
+            self.get_tok2char_span_map = lambda text: tokenizer.get_word2char_span_map(text)
             
     def clean_data_wo_span(self, ori_data, separate = False, data_type = "train"):
         '''
@@ -234,8 +234,7 @@ class Preprocessor:
     def split_into_short_samples(self, 
                      sample_list, 
                      max_seq_len, 
-                     sliding_len = 50, 
-                     encoder = "BERT", 
+                     sliding_len = 50,
                      data_type = "train"):
         new_sample_list = []
         for sample in tqdm(sample_list, desc = "Splitting"):
@@ -246,7 +245,7 @@ class Preprocessor:
 
             # sliding on token level
             for start_ind in range(0, len(tokens), sliding_len):
-                if encoder == "BERT": # if use bert, do not split a word into two samples
+                if self.for_bert: # if use bert, do not split a word into two samples
                     while "##" in tokens[start_ind]:
                         start_ind -= 1
                 end_ind = start_ind + max_seq_len
