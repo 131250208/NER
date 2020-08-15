@@ -9,6 +9,8 @@ import json
 from ner_common.components import HandshakingKernel
 from torch.nn.parameter import Parameter
 from transformers import AutoModel
+from flair.data import Sentence
+from flair.embeddings import FlairEmbeddings, StackedEmbeddings
 
 class HandshakingTaggingScheme:
     def __init__(self, tags, max_seq_len, visual_field):
@@ -189,9 +191,11 @@ class DataMaker:
         subword2char_span_list = []
         char_input_ids4subword_list = []
         word_input_ids_list = []
+        padded_sent_list = []
         subword2word_idx_map_list = []
         matrix_spots_batch = []
-
+        
+        
         for tp in batch_data:
             sample_list.append(tp[0])
             subword_input_ids_list.append(tp[1])
@@ -200,6 +204,14 @@ class DataMaker:
             subword2char_span_list.append(tp[4])
             char_input_ids4subword_list.append(tp[5])
             word_input_ids_list.append(tp[6])
+            # flair embeddings
+            max_word_num = tp[6].size()[0]
+            text = tp[0]["text"]
+            words = text.split(" ")
+            words.extend(["[PAD]"] * (max_word_num - len(words)))
+            sent = " ".join(words)
+            padded_sent_list.append(Sentence(sent))
+            
             subword2word_idx_map_list.append(tp[7])
             if data_type != "test":
                 matrix_spots_batch.append(tp[8])
@@ -217,6 +229,7 @@ class DataMaker:
             batch_shaking_tag = self.handshaking_tagger.spots2shaking_tag4batch(matrix_spots_batch)
 
         return sample_list, \
+            padded_sent_list, \
             batch_subword_input_ids, \
             batch_attention_mask, \
             batch_token_type_ids, \
@@ -230,9 +243,11 @@ class DataMaker:
 class TPLinkerNER(nn.Module):
     def __init__(self, 
              char_encoder_config,
-             bert_cofig,
+             bert_config,
              word_encoder_config,
+             flair_config,
              handshaking_kernel_config,
+             hidden_size,
              activate_enc_fc,
              entity_type_num):
         super().__init__()
@@ -245,7 +260,7 @@ class TPLinkerNER(nn.Module):
             "bilstm_dropout": char_bilstm_dropout,
             "max_char_num_in_tok": max_char_num_in_tok,
         }
-        bert_cofig = {
+        bert_config = {
             "path": encoder_path,
             "fintune": bert_finetune,
             "use_last_k_layers": use_last_k_layers_hiddens,
@@ -265,16 +280,6 @@ class TPLinkerNER(nn.Module):
         }
         '''
 
-        # bert 
-        bert_path = bert_cofig["path"]
-        bert_finetune = bert_cofig["fintune"]
-        self.use_last_k_layers_bert = bert_cofig["use_last_k_layers"]
-        self.bert = AutoModel.from_pretrained(bert_path)
-        if not bert_finetune: # if train without finetuning bert
-            for param in self.bert.parameters():
-                param.requires_grad = False       
-        bert_hidden_size = self.bert.config.hidden_size
-        
         # char encoder
         char_size = char_encoder_config["char_size"]
         char_emb_dim = char_encoder_config["emb_dim"]
@@ -308,25 +313,54 @@ class TPLinkerNER(nn.Module):
                          bidirectional = True,
                          batch_first = True)
         
+        combined_hidden_size = word_emb_dim + char_emb_dim
+        
+        # bert 
+        self.bert_config = bert_config
+        if bert_config is not None: 
+            bert_path = bert_config["path"]
+            bert_finetune = bert_config["fintune"]
+            self.use_last_k_layers_bert = bert_config["use_last_k_layers"]
+            self.bert = AutoModel.from_pretrained(bert_path)
+            if not bert_finetune: # if train without finetuning bert
+                for param in self.bert.parameters():
+                    param.requires_grad = False       
+#             hidden_size = self.bert.config.hidden_size
+            combined_hidden_size += self.bert.config.hidden_size
+        
+        # flair 
+        self.flair_config = flair_config
+        if flair_config is not None:
+            embedding_models = [FlairEmbeddings(emb_id) for emb_id in flair_config["embedding_ids"]]
+            self.stacked_flair_embeddings_model = StackedEmbeddings(embedding_models)
+            combined_hidden_size += embedding_models[0].embedding_length * len(embedding_models)
+        
         # encoding fc
-        self.enc_fc = nn.Linear(bert_hidden_size + word_emb_dim + char_emb_dim, bert_hidden_size)
+        self.enc_fc = nn.Linear(combined_hidden_size, hidden_size)
         self.activate_enc_fc = activate_enc_fc
         
         # handshaking kernel
         shaking_type = handshaking_kernel_config["shaking_type"]
         context_type = handshaking_kernel_config["context_type"]
         visual_field = handshaking_kernel_config["visual_field"]
-        self.handshaking_kernel = HandshakingKernel(bert_hidden_size, shaking_type, context_type, visual_field)
+        self.handshaking_kernel = HandshakingKernel(hidden_size, shaking_type, context_type, visual_field)
         
         # decoding fc
-        self.dec_fc = nn.Linear(bert_hidden_size, entity_type_num)
+        self.dec_fc = nn.Linear(hidden_size, entity_type_num)
         
-    def forward(self, char_input_ids, subword_input_ids, attention_mask, token_type_ids, word_input_ids, subword2word_idx):
-        # subword_input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
-        context_outputs = self.bert(subword_input_ids, attention_mask, token_type_ids)
-        # last_hidden_state: (batch_size, seq_len, bert_hidden_size)
-        hidden_states = context_outputs[2]
-        subword_hiddens = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_bert:], dim = 0), dim = 0)
+    def forward(self, char_input_ids, 
+                word_input_ids, 
+                padded_sents = None, 
+                subword_input_ids = None, 
+                attention_mask = None, 
+                token_type_ids = None, 
+                subword2word_idx = None):
+        if self.bert_config is not None:
+            # subword_input_ids, attention_mask, token_type_ids: (batch_size, seq_len)
+            context_outputs = self.bert(subword_input_ids, attention_mask, token_type_ids)
+            # last_hidden_state: (batch_size, seq_len, hidden_size)
+            hidden_states = context_outputs[2]
+            subword_hiddens = torch.mean(torch.stack(list(hidden_states)[-self.use_last_k_layers_bert:], dim = 0), dim = 0)
         
         # char_input_ids: (batch_size, seq_len * max_char_num_in_subword)
         # char_input_emb/char_hiddens: (batch_size, seq_len * max_char_num_in_subword, char_emb_dim)
@@ -341,13 +375,27 @@ class TPLinkerNER(nn.Module):
         word_input_emb = self.word_emb(word_input_ids)
         word_input_emb = self.word_emb_dropout(word_input_emb)
         word_hiddens, _ = self.word_lstm(word_input_emb)
-        word_chosen_hiddens = torch.gather(word_hiddens, 1, subword2word_idx[:,:,None].repeat(1, 1, word_hiddens.size()[-1]))
+
+        # cat word embeddings and flair embeddings 
+        if self.flair_config is not None:
+            self.stacked_flair_embeddings_model.embed(padded_sents)
+            flair_embeddings = torch.stack([torch.stack([tok.embedding for tok in sent]) for sent in padded_sents])
+            word_hiddens = torch.cat([word_hiddens, flair_embeddings], dim = -1)
         
-        combined_hiddens = self.enc_fc(torch.cat([char_conv_output, subword_hiddens, word_chosen_hiddens], dim = -1))
+        # features
+        features = [char_conv_output, word_hiddens]
+        
+        # chose and repeat word hiddens, to align with subword num
+        if self.bert_config is not None:
+            word_chosen_hiddens = torch.gather(word_hiddens, 1, subword2word_idx[:,:,None].repeat(1, 1, word_hiddens.size()[-1]))
+            features = [char_conv_output, subword_hiddens, word_chosen_hiddens]
+            
+        # combine features
+        combined_hiddens = self.enc_fc(torch.cat(features, dim = -1))
         if self.activate_enc_fc:
             combined_hiddens = torch.tanh(combined_hiddens)
         
-        # shaking_hiddens: (batch_size, shaking_seq_len, bert_hidden_size)
+        # shaking_hiddens: (batch_size, shaking_seq_len, hidden_size)
         # shaking_seq_len: max_seq_len * vf - sum(1, vf)
         shaking_hiddens = self.handshaking_kernel(combined_hiddens)
         
