@@ -1,7 +1,7 @@
 experiment_name: genia
-run_name: cln_p+biobert
+run_name: cln_p+bilstm
 
-data_home: ../data/bilstm
+data_home: ../data/bert-base-cased
 # # biobert-large-cased-pubmed-58k
 # # bert-large-cased
 # # bert-base-cased
@@ -14,7 +14,7 @@ meta: meta.json
 word2idx: word2idx.json
 char2idx: char2idx.json
  
-device_num: 1
+device_num: 0
 
 wandb: false
 path_to_save_model: ../model_state
@@ -31,7 +31,7 @@ hyper_parameters:
  batch_size: 32
  parallel: false
  epochs: 100
- lr: 1e-3
+ lr: 1e-4
  seed: 2333
  log_interval: 10
  ## learning schedule
@@ -47,34 +47,53 @@ hyper_parameters:
  # >>>>>>>>Model config>>>>>>>>>>>>>
  ## char encoder
  use_char_encoder: true
- char_emb_dim: 64
- char_emb_dropout: 0.1
- char_bilstm_layers: 2
- char_bilstm_dropout: 0.05
- ## subword encoder
- use_bert: false
- encoder: BERT
- bert_path: ../../pretrained_models/biobert_v1.0_pubmed_pmc # biobert_v1.0_pubmed_pmc
- use_last_k_bert_layers: 1
- bert_finetune: true
+ char_encoder_config:
+  emb_dim: 64
+  emb_dropout: 0.1
+  bilstm_layers: 
+   - 1
+   - 1
+  bilstm_hidden_size: 
+   - 64
+   - 128
+  bilstm_dropout:
+   - 0.
+   - 0.05
+   - 0.
+ ## bert: subword encoder
+ use_bert: true
+ bert_config:
+  path: ../../pretrained_models/biobert_v1.0_pubmed_pmc # biobert_v1.0_pubmed_pmc
+  use_last_k_layers: 1
+  finetune: true
  ## word encoder
  use_word_encoder: true
- word_emb_key: pubmed # pubmed, glove
- word_emb_dropout: 0.1
- word_bilstm_layers: 2
- word_bilstm_dropout: 0.05
- freeze_word_emb: false
+ word_encoder_config:
+  emb_key: pubmed # pubmed, glove
+  emb_dropout: 0.1
+  bilstm_layers: 
+   - 1
+   - 1
+  bilstm_hidden_size: 
+   - 300
+   - 600
+  bilstm_dropout:
+   - 0.
+   - 0.05
+   - 0.
+  freeze_word_emb: false
  ## flair
  use_flair: false
  flair_embedding_ids:
   - pubmed-forward
   - pubmed-backward
  ## handshaking kernel
- visual_field: -1 # -1: use recommended value
- shaking_type: cln_plus
- context_type: lstm
+ handshaking_kernel_config:
+  visual_field: -1 # -1: use recommended value
+  shaking_type: cln_plus
+  context_type: lstm
  ## encoding fc
- enc_hidden_size: 768
+ enc_hidden_size: 600
  activate_enc_fc: false
  
 # when to save the model state dict

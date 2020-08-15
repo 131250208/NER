@@ -316,19 +316,27 @@ class TPLinkerNER(nn.Module):
             char_size = char_encoder_config["char_size"]
             char_emb_dim = char_encoder_config["emb_dim"]
             char_emb_dropout = char_encoder_config["emb_dropout"]
+            char_bilstm_hidden_size = char_encoder_config["bilstm_hidden_size"]
             char_bilstm_layers = char_encoder_config["bilstm_layers"]
             char_bilstm_dropout = char_encoder_config["bilstm_dropout"]
             max_char_num_in_subword = char_encoder_config["max_char_num_in_tok"]
             self.char_emb = nn.Embedding(char_size, char_emb_dim)
             self.char_emb_dropout = nn.Dropout(p = char_emb_dropout)
-            self.char_lstm = nn.LSTM(char_emb_dim, 
-                           char_emb_dim // 2, 
-                           num_layers = char_bilstm_layers, 
-                           dropout = char_bilstm_dropout,
+            self.char_lstm_l1 = nn.LSTM(char_emb_dim, 
+                           char_bilstm_hidden_size[0] // 2, 
+                           num_layers = char_bilstm_layers[0], 
+                           dropout = char_bilstm_dropout[0],
                            bidirectional = True,
                            batch_first = True)
-            self.char_cnn = nn.Conv1d(char_emb_dim, char_emb_dim, max_char_num_in_subword, stride = max_char_num_in_subword)
-            combined_hidden_size += char_emb_dim
+            self.char_lstm_dropout = nn.Dropout(p = char_bilstm_dropout[1])
+            self.char_lstm_l2 = nn.LSTM(char_bilstm_hidden_size[0], 
+                           char_bilstm_hidden_size[1] // 2, 
+                           num_layers = char_bilstm_layers[1], 
+                           dropout = char_bilstm_dropout[2],
+                           bidirectional = True,
+                           batch_first = True)
+            self.char_cnn = nn.Conv1d(char_bilstm_hidden_size[1], char_bilstm_hidden_size[1], max_char_num_in_subword, stride = max_char_num_in_subword)
+            combined_hidden_size += char_bilstm_hidden_size[1]
         
         # word encoder
         ## init word embedding
@@ -338,6 +346,7 @@ class TPLinkerNER(nn.Module):
             word_size = len(word2idx)
             word_emb_key = word_encoder_config["emb_key"]
             word_emb_dropout = word_encoder_config["emb_dropout"]
+            word_bilstm_hidden_size = word_encoder_config["bilstm_hidden_size"]
             word_bilstm_layers = word_encoder_config["bilstm_layers"]
             word_bilstm_dropout = word_encoder_config["bilstm_dropout"]
             freeze_word_emb = word_encoder_config["freeze_word_emb"]
@@ -362,20 +371,27 @@ class TPLinkerNER(nn.Module):
             ## word encoder model
             self.word_emb = nn.Embedding.from_pretrained(init_word_embedding_matrix, freeze = freeze_word_emb)
             self.word_emb_dropout = nn.Dropout(p = word_emb_dropout)
-            self.word_lstm = nn.LSTM(word_emb_dim, 
-                             word_emb_dim // 2, 
-                             num_layers = word_bilstm_layers,
-                             dropout = word_bilstm_dropout,
+            self.word_lstm_l1 = nn.LSTM(word_emb_dim, 
+                             word_bilstm_hidden_size[0] // 2, 
+                             num_layers = word_bilstm_layers[0],
+                             dropout = word_bilstm_dropout[0],
                              bidirectional = True,
                              batch_first = True)
-            combined_hidden_size += word_emb_dim
+            self.word_lstm_dropout = nn.Dropout(p = word_bilstm_dropout[1])
+            self.word_lstm_l2 = nn.LSTM(word_bilstm_hidden_size[0], 
+                             word_bilstm_hidden_size[1] // 2, 
+                             num_layers = word_bilstm_layers[1],
+                             dropout = word_bilstm_dropout[2],
+                             bidirectional = True,
+                             batch_first = True)
+            combined_hidden_size += word_bilstm_hidden_size[1]
         
         
         # bert 
         self.bert_config = bert_config
         if bert_config is not None: 
             bert_path = bert_config["path"]
-            bert_finetune = bert_config["fintune"]
+            bert_finetune = bert_config["finetune"]
             self.use_last_k_layers_bert = bert_config["use_last_k_layers"]
             self.bert = AutoModel.from_pretrained(bert_path)
             if not bert_finetune: # if train without finetuning bert
@@ -420,7 +436,8 @@ class TPLinkerNER(nn.Module):
             # char_conv_oudtut: (batch_size, seq_len, char_emb_dim)
             char_input_emb = self.char_emb(char_input_ids)
             char_input_emb = self.char_emb_dropout(char_input_emb)
-            char_hiddens, _ = self.char_lstm(char_input_emb)
+            char_hiddens, _ = self.char_lstm_l1(char_input_emb)
+            char_hiddens, _ = self.char_lstm_l2(self.char_lstm_dropout(char_hiddens))
             char_conv_oudtut = self.char_cnn(char_hiddens.permute(0, 2, 1)).permute(0, 2, 1)
             features.append(char_conv_oudtut)
         
@@ -429,7 +446,8 @@ class TPLinkerNER(nn.Module):
             # word_input_emb/word_hiddens: batch_size, seq_len, word_emb_dim)
             word_input_emb = self.word_emb(word_input_ids)
             word_input_emb = self.word_emb_dropout(word_input_emb)
-            word_hiddens, _ = self.word_lstm(word_input_emb)
+            word_hiddens, _ = self.word_lstm_l1(word_input_emb)
+            word_hiddens, _ = self.word_lstm_l2(self.word_lstm_dropout(word_hiddens))
             if self.bert_config is not None:
                 # chose and repeat word hiddens, to align with subword num
                 word_hiddens = torch.gather(word_hiddens, 1, subword2word_idx[:,:,None].repeat(1, 1, word_hiddens.size()[-1]))
