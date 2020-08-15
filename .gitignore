@@ -7,6 +7,7 @@ results/
 *.emb
 *.pt
 *.csv
+*.log
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
