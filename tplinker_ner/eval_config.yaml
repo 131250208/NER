@@ -5,27 +5,75 @@ run_ids:
 
 last_k_model: 5
 
-data_home: ../data/data4biobert_v1.0_pubmed_pmc
+data_home: ../data/biobert-large-cased-pubmed-58k
+# biobert-large-cased-pubmed-58k
+# bert-large-cased
+# bert-base-cased
+# biobert_v1.0_pubmed_pmc
+
 test_data: "*test*.json"
 meta: meta.json
- 
+word2idx: word2idx.json
+char2idx: char2idx.json
+
 device_num: 3
 
-# >>>>>>>>encoder>>>>>>>>>>>
-encoder: BERT
-bert_path: /home/wangyucheng/opt/transformers_models_h5/biobert_v1.0_pubmed_pmc
-use_last_k_layers_hiddens: 1
-add_bilstm_on_the_top: false
-bilstm_layers: 2
-bilstm_dropout: 0.05
+# >>>>>>>>Model>>>>>>>>>>>
+## char encoder
+use_char_encoder: true
+char_encoder_config:
+ emb_dim: 64
+ emb_dropout: 0.1
+ bilstm_layers: 
+  - 1
+  - 1
+ bilstm_hidden_size: 
+  - 64
+  - 128
+ bilstm_dropout:
+  - 0.
+  - 0.05
+  - 0.
+## bert: subword encoder
+use_bert: false
+bert_config:
+ path: ../../pretrained_models/biobert_v1.0_pubmed_pmc # biobert_v1.0_pubmed_pmc
+ use_last_k_layers: 1
+ finetune: true
+## word encoder
+use_word_encoder: true
+word_encoder_config:
+ emb_key: pubmed # pubmed, glove
+ emb_dropout: 0.1
+ bilstm_layers: 
+  - 1
+  - 1
+ bilstm_hidden_size: 
+  - 300
+  - 600
+ bilstm_dropout:
+  - 0.
+  - 0.05
+  - 0.
+ freeze_word_emb: false
+## flair
+use_flair: false
+flair_embedding_ids:
+ - pubmed-forward
+ - pubmed-backward
+## handshaking kernel
+handshaking_kernel_config:
+ visual_field: -1 # -1: use recommended value
+ shaking_type: cln_plus
+ context_type: lstm
+## encoding fc
+enc_hidden_size: 768
+activate_enc_fc: false
 
-# parameters
-shaking_type: cln_plus
+# predict config
 batch_size: 32
-force_split: false
-max_test_seq_len: 150
+max_seq_len: 150
 sliding_len: 100
-visual_field: -1 # -1: use recommended value
 correct: whole_span # head_n_tail, only_head, whole_text
 
 # results
