@@ -2,10 +2,10 @@ experiment_name: genia
 run_name: cln_p+bilstm
 
 data_home: ../data/bilstm
-# # biobert-large-cased-pubmed-58k
-# # bert-large-cased
-# # bert-base-cased
-# # biobert_v1.0_pubmed_pmc
+# biobert-large-cased-pubmed-58k
+# bert-large-cased
+# bert-base-cased
+# biobert_v1.0_pubmed_pmc
 
 # data file name
 train_data: train_data.json
@@ -14,7 +14,7 @@ meta: meta.json
 word2idx: word2idx.json
 char2idx: char2idx.json
  
-device_num: 0
+device_num: 3
 
 wandb: true
 path_to_save_model: ../model_state
@@ -31,7 +31,7 @@ hyper_parameters:
  batch_size: 36
  parallel: false
  epochs: 100
- lr: 1e-4
+ lr: 5e-5
  seed: 2333
  log_interval: 10
  ## learning schedule
