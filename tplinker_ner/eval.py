@@ -34,7 +34,6 @@ from tplinker_ner import (HandshakingTaggingScheme,
                           TPLinkerNER,
                           Metrics)
 import wandb
-from glove import Glove
 import numpy as np
 from collections import OrderedDict
 
