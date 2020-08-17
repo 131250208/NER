@@ -541,6 +541,9 @@ class Metrics:
         y_true and y_pred have the same shape，elements in y_true are either 0 or 1，
              1 tags positive classes，0 tags negtive classes(means tok-pair does not have this type of link).
         """
+        y_pred = y_pred.float()
+        y_true = y_true.float()
+
         y_pred = (1 - 2 * y_true) * y_pred # -1 -> pos classes, 1 -> neg classes
         y_pred_neg = y_pred - y_true * 1e12 # mask the pred oudtuts of pos classes
         y_pred_pos = y_pred - (1 - y_true) * 1e12 # mask the pred oudtuts of neg classes
