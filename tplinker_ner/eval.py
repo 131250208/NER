@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[1]:
+# In[ ]:
 
 
 try:
@@ -38,22 +38,11 @@ import numpy as np
 from collections import OrderedDict
 
 
-# In[4]:
+# In[ ]:
 
 
 print(torch.cuda.device_count(), "GPUs are available")
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-# meta_path = os.path.join(data_home, exp_name, config["meta"])
-# batch_size = config["batch_size"]
-# encoder_path = config["bert_path"]
-# visual_field = config["visual_field"]
-# use_last_k_layers_hiddens = config["use_last_k_layers_hiddens"]
-# add_bilstm_on_the_top = config["add_bilstm_on_the_top"]
-# bilstm_layers = config["bilstm_layers"]
-# bilstm_dropout = config["bilstm_dropout"]
-
-# >>>>>>>>>data path>>>>>>>>>>>>>>
 
 
 # In[ ]:
@@ -69,7 +58,11 @@ batch_size = config["batch_size"]
 
 # >>>>>>>>>>model config>>>>>>>>>>>>
 ## char encoder
-char_encoder_config = config["char_encoder_config"] if config["use_char_encoder"] else None
+max_char_num_in_tok = config["max_char_num_in_tok"]
+char_encoder_config = None
+if config["use_char_encoder"]:
+    char_encoder_config = config["char_encoder_config"]
+    char_encoder_config["max_char_num_in_tok"] = max_char_num_in_tok
 
 ## bert encoder
 bert_config = config["bert_config"] if config["use_bert"] else None
@@ -85,7 +78,6 @@ flair_config = {
 
 ## handshaking_kernel
 handshaking_kernel_config = config["handshaking_kernel_config"]
-visual_field = handshaking_kernel_config["visual_field"]
 
 ## encoding fc
 enc_hidden_size = config["enc_hidden_size"]
@@ -101,7 +93,7 @@ word2idx_path = os.path.join(data_home, exp_name, config["word2idx"])
 char2idx_path = os.path.join(data_home, exp_name, config["char2idx"])
 
 
-# In[5]:
+# In[ ]:
 
 
 test_data_path_dict = {}
@@ -112,7 +104,7 @@ for path in glob.glob(test_data_path):
 
 # # Load Data
 
-# In[6]:
+# In[ ]:
 
 
 test_data_dict = {}
@@ -122,7 +114,7 @@ for file_name, path in test_data_path_dict.items():
 
 # # Split
 
-# In[7]:
+# In[ ]:
 
 
 # init tokenizers
@@ -151,7 +143,7 @@ def split(data, max_seq_len, sliding_len, data_name = "train"):
     print("max token number of {}: {}".format(data_name, max_tok_num))
     
     if max_tok_num > max_seq_len:
-        print("max token number of {} is greater than the setting, need to split!, max_seq_len of {} is {}".format(data_name, data_name, max_seq_len))
+        print("max token number of {} is greater than the setting, need to split!".format(data_name, data_name, max_seq_len))
         short_data = preprocessor.split_into_short_samples(data, 
                                           max_seq_len, 
                                           sliding_len = sliding_len, 
@@ -159,11 +151,11 @@ def split(data, max_seq_len, sliding_len, data_name = "train"):
     else:
         short_data = data
         max_seq_len = max_tok_num
-        print("max token number of {} is less than the setting, no need to split! max_seq_len of {} is reset to {}.".format(data_name, data_name, max_tok_num))
+        print("max token number of {} is less than the setting, no need to split!".format(data_name, data_name, max_tok_num))
     return short_data, max_seq_len
 
 
-# In[9]:
+# In[ ]:
 
 
 # all_data = []
@@ -176,7 +168,7 @@ def split(data, max_seq_len, sliding_len, data_name = "train"):
 #     max_tok_num = max(len(tokens), max_tok_num)
 
 
-# In[10]:
+# In[ ]:
 
 
 # split_test_data = False
@@ -199,29 +191,29 @@ for file_name, data in ori_test_data_dict.items():
     max_seq_len_all_data.append(max_seq_len_this_data)
     test_data_dict[file_name] = split_data
 max_seq_len = max(max_seq_len_all_data)
-print("max_seq_len is reset to {}.".format(max_seq_len))
+print("final max_seq_len is {}".format(max_seq_len))
 
 
-# In[11]:
+# In[ ]:
 
 
 for filename, short_data in test_data_dict.items():
-    print("{}: {}".format(filename, len(short_data)))
+    print("example number of {}: {}".format(filename, len(short_data)))
 
 
 # # Decoder(Tagger)
 
-# In[12]:
+# In[ ]:
 
 
 meta = json.load(open(meta_path, "r", encoding = "utf-8"))
 tags = meta["tags"]
-if meta["visual_field_rec"] > visual_field:
-    visual_field = meta["visual_field_rec"]
-    print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(visual_field))
+if meta["visual_field_rec"] > handshaking_kernel_config["visual_field"]:
+    handshaking_kernel_config["visual_field"] = meta["visual_field_rec"]
+    print("Recommended visual_field is greater than current visual_field, reset to rec val: {}".format(handshaking_kernel_config["visual_field"]))
 
 
-# In[13]:
+# In[ ]:
 
 
 handshaking_tagger = HandshakingTaggingScheme(tags, max_seq_len, handshaking_kernel_config["visual_field"])
@@ -250,7 +242,7 @@ def text2char_indices(text, max_seq_len = -1):
 
 # # Dataset
 
-# In[14]:
+# In[ ]:
 
 
 if use_bert:
@@ -259,7 +251,7 @@ else:
     data_maker = DataMaker(handshaking_tagger, word_tokenizer, text2char_indices)
 
 
-# In[15]:
+# In[ ]:
 
 
 class MyDataset(Dataset):
@@ -288,24 +280,24 @@ def cal_max_tok_num(data, tokenizer):
 # In[ ]:
 
 
-# max character num of a single word
-def get_max_char_num_in_subword(data):
-    max_char_num = 0
-    for example in data:
-        text = example["text"]
-        subword2char_span = bert_tokenizer.encode_plus(text, 
-                                                       return_offsets_mapping = True, 
-                                                       add_special_tokens = False)["offset_mapping"]
-        max_char_num = max([span[1] - span[0] for span in subword2char_span] + [max_char_num, ])
-    return max_char_num
+# # max character num of a single word
+# def get_max_char_num_in_subword(data):
+#     max_char_num = 0
+#     for example in data:
+#         text = example["text"]
+#         subword2char_span = bert_tokenizer.encode_plus(text, 
+#                                                        return_offsets_mapping = True, 
+#                                                        add_special_tokens = False)["offset_mapping"]
+#         max_char_num = max([span[1] - span[0] for span in subword2char_span] + [max_char_num, ])
+#     return max_char_num
 
-def get_max_char_num_in_word(data):
-    max_char_num = 0
-    for example in data:
-        text = example["text"]
-        word2char_span = word_tokenizer.encode_plus(text)["offset_mapping"]
-        max_char_num = max([span[1] - span[0] for span in word2char_span] + [max_char_num, ])
-    return max_char_num
+# def get_max_char_num_in_word(data):
+#     max_char_num = 0
+#     for example in data:
+#         text = example["text"]
+#         word2char_span = word_tokenizer.encode_plus(text)["offset_mapping"]
+#         max_char_num = max([span[1] - span[0] for span in word2char_span] + [max_char_num, ])
+#     return max_char_num
 
 
 # In[ ]:
@@ -322,22 +314,21 @@ if use_bert:
     max_subword_num = cal_max_tok_num(all_data, bert_tokenizer)
     print("max_subword_num: {}".format(max_subword_num))
 
-# max_char_num_in_tok   
-if use_bert:
-    max_char_num_in_tok = get_max_char_num_in_subword(all_data)
-else:
-    max_char_num_in_tok = get_max_char_num_in_word(all_data)
-print("max_char_num_in_tok: {}".format(max_char_num_in_tok))
+# # max_char_num_in_tok   
+# if use_bert:
+#     max_char_num_in_tok = get_max_char_num_in_subword(all_data)
+# else:
+#     max_char_num_in_tok = get_max_char_num_in_word(all_data)
+# print("max_char_num_in_tok: {}".format(max_char_num_in_tok))
 
 
 # # Model
 
-# In[16]:
+# In[ ]:
 
 
 if char_encoder_config is not None:
     char_encoder_config["char_size"] = len(char2idx)
-    char_encoder_config["max_char_num_in_tok"] = max_char_num_in_tok
 if word_encoder_config is not None:
     word_encoder_config["word2idx"] = word2idx
 ent_extractor = TPLinkerNER(char_encoder_config,
@@ -354,7 +345,7 @@ ent_extractor = ent_extractor.to(device)
 
 # # Merics
 
-# In[17]:
+# In[ ]:
 
 
 metrics = Metrics(handshaking_tagger)
@@ -362,7 +353,7 @@ metrics = Metrics(handshaking_tagger)
 
 # # Prediction
 
-# In[18]:
+# In[ ]:
 
 
 # get model state paths
@@ -381,7 +372,7 @@ print("Following model states will be loaded: ")
 pprint(run_id2model_state_paths)
 
 
-# In[19]:
+# In[ ]:
 
 
 def get_last_k_paths(path_list, k):
@@ -390,7 +381,7 @@ def get_last_k_paths(path_list, k):
     return path_list[-k:]
 
 
-# In[20]:
+# In[ ]:
 
 
 # only last k models
@@ -399,7 +390,7 @@ for run_id, path_list in run_id2model_state_paths.items():
     run_id2model_state_paths[run_id] = get_last_k_paths(path_list, k)
 
 
-# In[21]:
+# In[ ]:
 
 
 def filter_duplicates(ent_list):
@@ -413,34 +404,15 @@ def filter_duplicates(ent_list):
     return filtered_ent_list
 
 
-# In[22]:
+# In[ ]:
 
 
-def predict(test_data, ori_test_data):
+def predict(test_dataloader, ori_test_data):
     '''
     test_data: if split, it would be samples with subtext
     ori_test_data: the original data has not been split, used to get original text here
     '''
-#     indexed_test_data = data_maker.get_indexed_data(test_data, max_seq_len, data_type = "test") # fill up to max_seq_len
-    if use_bert:
-        indexed_test_data = data_maker.get_indexed_data(test_data,
-                                                                max_word_num,
-                                                                max_char_num_in_tok, 
-                                                                max_subword_num_train, 
-                                                                data_type = "test")
-    else:
-        indexed_test_data = data_maker.get_indexed_data(test_data,
-                                                        max_word_num,
-                                                        max_char_num_in_tok, 
-                                                        data_type = "test")
-    test_dataloader = DataLoader(MyDataset(indexed_test_data), 
-                              batch_size = batch_size, 
-                              shuffle = False, 
-                              num_workers = 6,
-                              drop_last = False,
-                              collate_fn = lambda data_batch: data_maker.generate_batch(data_batch, use_bert = use_bert, data_type = "test"),
-                             )
-    
+#     indexed_test_data = data_maker.get_indexed_data(test_data, max_seq_len, data_type = "test") # fill up to max_seq_len    
     pred_sample_list = []
     for batch_test_data in tqdm(test_dataloader, desc = "Predicting"):
 #         if config["encoder"] == "BERT":
@@ -467,14 +439,14 @@ def predict(test_data, ori_test_data):
 # #             elif config["encoder"] in {"BiLSTM", }:
 # #                 batch_pred_shaking_outputs = ent_extractor(batch_input_ids)
         if bert_config is not None:
-            sample_list,             padded_sent_list,             batch_subword_input_ids,             batch_attention_mask,             batch_token_type_ids,             tok2char_span_list,             batch_char_input_ids4subword,             batch_word_input_ids,             batch_subword2word_idx_map,             batch_gold_shaking_tag = batch_test_data
+            sample_list,             padded_sent_list,             batch_subword_input_ids,             batch_attention_mask,             batch_token_type_ids,             tok2char_span_list,             batch_char_input_ids4subword,             batch_word_input_ids,             batch_subword2word_idx_map,             _ = batch_test_data
         else:
-            sample_list,             padded_sent_list,             batch_char_input_ids4subword,             batch_word_input_ids,             tok2char_span_list,             batch_gold_shaking_tag = batch_test_data
+            sample_list,             padded_sent_list,             batch_char_input_ids4subword,             batch_word_input_ids,             tok2char_span_list,             _ = batch_test_data
 
-        batch_char_input_ids4subword,         batch_word_input_ids,         batch_gold_shaking_tag = (batch_char_input_ids4subword.to(device), 
-                                  batch_word_input_ids.to(device),
-                                  batch_gold_shaking_tag.to(device) 
+        batch_char_input_ids4subword,         batch_word_input_ids = (batch_char_input_ids4subword.to(device), 
+                                  batch_word_input_ids.to(device)
                                      )
+        
         if bert_config is not None:
                 batch_subword_input_ids,                 batch_attention_mask,                 batch_token_type_ids,                 batch_subword2word_idx_map = (batch_subword_input_ids.to(device), 
                                               batch_attention_mask.to(device), 
@@ -504,8 +476,7 @@ def predict(test_data, ori_test_data):
             tok2char_span = tok2char_span_list[ind]
             pred_shaking_tag = batch_pred_shaking_tag[ind]
             tok_offset, char_offset = 0, 0
-            if split_test_data:
-                tok_offset, char_offset = sample["tok_offset"], sample["char_offset"]
+            tok_offset, char_offset = (sample["tok_offset"], sample["char_offset"]) if "char_offset" in sample else (0, 0)
             ent_list = handshaking_tagger.decode_ent(text, 
                                                      pred_shaking_tag, 
                                                      tok2char_span, 
@@ -538,7 +509,7 @@ def predict(test_data, ori_test_data):
     return merged_pred_sample_list
 
 
-# In[23]:
+# In[ ]:
 
 
 def get_test_prf(pred_sample_list, gold_test_data, pattern = "only_head"):
@@ -578,7 +549,7 @@ def get_test_prf(pred_sample_list, gold_test_data, pattern = "only_head"):
     return prf
 
 
-# In[24]:
+# In[ ]:
 
 
 # predict
@@ -586,6 +557,27 @@ res_dict = {}
 predict_statistics = {}
 for file_name, short_data in test_data_dict.items():
     ori_test_data = ori_test_data_dict[file_name]
+    # index data and init dataloader
+    if use_bert:
+        indexed_test_data = data_maker.get_indexed_data(short_data,
+                                                        max_word_num,
+                                                        max_char_num_in_tok, 
+                                                        max_subword_num, 
+                                                        data_type = "test")
+    else:
+        indexed_test_data = data_maker.get_indexed_data(short_data,
+                                                        max_word_num,
+                                                        max_char_num_in_tok, 
+                                                        data_type = "test")
+    test_dataloader = DataLoader(MyDataset(indexed_test_data), 
+                              batch_size = batch_size, 
+                              shuffle = False, 
+                              num_workers = 6,
+                              drop_last = False,
+                              collate_fn = lambda data_batch: data_maker.generate_batch(data_batch, use_bert = use_bert, data_type = "test"),
+                             )
+    
+    # iter all model state dicts
     for run_id, model_path_list in run_id2model_state_paths.items():
         save_dir4run = os.path.join(save_res_dir, run_id)
         if config["save_res"] and not os.path.exists(save_dir4run):
@@ -611,14 +603,14 @@ for file_name, short_data in test_data_dict.items():
                 print("run_id: {}, model state {} loaded".format(run_id, model_state_path.split("/")[-1]))
 
                 # predict
-                pred_sample_list = predict(short_data, ori_test_data)
+                pred_sample_list = predict(test_dataloader, ori_test_data)
             
             res_dict[save_path] = pred_sample_list
             predict_statistics[save_path] = len([s for s in pred_sample_list if len(s["entity_list"]) > 0])
 pprint(predict_statistics)
 
 
-# In[25]:
+# In[ ]:
 
 
 # score
@@ -633,7 +625,7 @@ if config["score"]:
     pprint(filepath2scores)
 
 
-# In[26]:
+# In[ ]:
 
 
 # check char span
@@ -644,7 +636,7 @@ for path, res in res_dict.items():
             assert ent["text"] == text[ent["char_span"][0]:ent["char_span"][1]]
 
 
-# In[27]:
+# In[ ]:
 
 
 # save 

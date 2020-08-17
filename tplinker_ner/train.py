@@ -95,7 +95,11 @@ epoch_num = hyper_parameters["epochs"]
 
 # >>>>>>>>>>model config>>>>>>>>>>>>
 ## char encoder
-char_encoder_config = hyper_parameters["char_encoder_config"] if hyper_parameters["use_char_encoder"] else None
+max_char_num_in_tok = hyper_parameters["max_char_num_in_tok"]
+char_encoder_config = None
+if hyper_parameters["use_char_encoder"]:
+    char_encoder_config = hyper_parameters["char_encoder_config"]
+    char_encoder_config["max_char_num_in_tok"] = max_char_num_in_tok
 
 ## bert encoder
 bert_config = hyper_parameters["bert_config"] if hyper_parameters["use_bert"] else None
@@ -115,7 +119,6 @@ handshaking_kernel_config = hyper_parameters["handshaking_kernel_config"]
 ## encoding fc
 enc_hidden_size = hyper_parameters["enc_hidden_size"]
 activate_enc_fc = hyper_parameters["activate_enc_fc"]
-
 
 # >>>>>>>>>data path>>>>>>>>>>>>>>
 data_home = config["data_home"]
@@ -146,6 +149,7 @@ if use_bert:
 word2idx = json.load(open(word2idx_path, "r", encoding = "utf-8"))
 word_tokenizer = WordTokenizer(word2idx)
 
+# preprocessor
 tokenizer4preprocess = bert_tokenizer if use_bert else word_tokenizer
 preprocessor = Preprocessor(tokenizer4preprocess, use_bert)
 
@@ -340,33 +344,29 @@ if use_bert:
 # In[ ]:
 
 
-# max character num of a single word
-def get_max_char_num_in_subword(data):
-    max_char_num = 0
-    for example in data:
-        text = example["text"]
-        subword2char_span = bert_tokenizer.encode_plus(text, 
-                                                       return_offsets_mapping = True, 
-                                                       add_special_tokens = False)["offset_mapping"]
-        max_char_num = max([span[1] - span[0] for span in subword2char_span] + [max_char_num, ])
-    return max_char_num
+# # max character num of a single word
+# def get_max_char_num_in_subword(data):
+#     max_char_num = 0
+#     for example in data:
+#         text = example["text"]
+#         subword2char_span = bert_tokenizer.encode_plus(text, 
+#                                                        return_offsets_mapping = True, 
+#                                                        add_special_tokens = False)["offset_mapping"]
+#         max_char_num = max([span[1] - span[0] for span in subword2char_span] + [max_char_num, ])
+#     return max_char_num
 
-def get_max_char_num_in_word(data):
-    max_char_num = 0
-    for example in data:
-        text = example["text"]
-        word2char_span = word_tokenizer.encode_plus(text)["offset_mapping"]
-        max_char_num = max([span[1] - span[0] for span in word2char_span] + [max_char_num, ])
-    return max_char_num
+# def get_max_char_num_in_word(data):
+#     max_char_num = 0
+#     for example in data:
+#         text = example["text"]
+#         word2char_span = word_tokenizer.encode_plus(text)["offset_mapping"]
+#         max_char_num = max([span[1] - span[0] for span in word2char_span] + [max_char_num, ])
+#     return max_char_num
 
-
-# In[ ]:
-
-
-if use_bert:
-    max_char_num_in_tok = get_max_char_num_in_subword(short_train_data + short_valid_data)
-else:
-    max_char_num_in_tok = get_max_char_num_in_word(short_train_data + short_valid_data)
+# if use_bert:
+#     max_char_num_in_tok = get_max_char_num_in_subword(short_train_data + short_valid_data)
+# else:
+#     max_char_num_in_tok = get_max_char_num_in_word(short_train_data + short_valid_data)
 
 
 # In[ ]:

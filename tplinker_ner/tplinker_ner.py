@@ -61,7 +61,7 @@ class HandshakingTaggingScheme:
         return matrix_spots: [(start_pos, end_pos, tag_id), ]
         '''
         matrix_spots = []
-        for point in shaking_tag.nonzero():
+        for point in torch.nonzero(shaking_tag): #  shaking_tag.nonzero() -> torch.nonzero(shaking_tag)
             shaking_idx, tag_idx = point[0].item(), point[1].item()
             matrix_points = self.shaking_idx2matrix_idx[shaking_idx]
             spot = (matrix_points[0], matrix_points[1], tag_idx)
@@ -169,9 +169,11 @@ class DataMaker:
                 char_input_ids_padded = []
                 for span in offset_mapping:
                     char_ids = char_input_ids[span[0]:span[1]]
-                    assert len(char_ids) <= max_char_num_in_tok
+                    
                     if len(char_ids) < max_char_num_in_tok:
                         char_ids.extend([0] * (max_char_num_in_tok - len(char_ids)))
+                    else:
+                        char_ids = char_ids[:max_char_num_in_tok]
                     char_input_ids_padded.extend(char_ids)
                 return torch.tensor(char_input_ids_padded).long()
             if max_subword_num is not None:

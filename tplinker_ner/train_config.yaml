@@ -1,5 +1,5 @@
 experiment_name: genia
-run_name: cln_p+bioL+flair
+run_name: cln_p+lstm_cont+bioL
 
 data_home: ../data/biobert-large-cased-pubmed-58k
 # # biobert-large-cased-pubmed-58k
@@ -22,8 +22,8 @@ path_to_save_model: ../model_state
 hyper_parameters:
  # >>>>>>>>>Preprocessing>>>>>>>>>>>
 #  token_type: subword
- max_seq_len: 128
- pred_max_seq_len: 128
+ max_seq_len: 150
+ pred_max_seq_len: 150
  sliding_len: 20
  pred_sliding_len: 20
  
@@ -31,7 +31,7 @@ hyper_parameters:
  batch_size: 32
  parallel: false
  epochs: 100
- lr: 5e-5
+ lr: 7e-5
  seed: 2333
  log_interval: 10
  ## learning schedule
@@ -47,6 +47,7 @@ hyper_parameters:
  # >>>>>>>>Model config>>>>>>>>>>>>>
  ## char encoder
  use_char_encoder: true
+ max_char_num_in_tok: 16
  char_encoder_config:
   emb_dim: 64
   emb_dropout: 0.1
@@ -83,7 +84,7 @@ hyper_parameters:
    - 0.
   freeze_word_emb: false
  ## flair
- use_flair: true
+ use_flair: false
  flair_embedding_ids:
   - pubmed-forward
   - pubmed-backward
