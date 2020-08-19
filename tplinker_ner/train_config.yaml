@@ -1,7 +1,7 @@
 experiment_name: genia
-run_name: cln_p+bilstm
+run_name: cln_p+bioL+6e-5
 
-data_home: ../data/bilstm
+data_home: ../data/biobert-large-cased-pubmed-58k
 # # biobert-large-cased-pubmed-58k
 # # bert-large-cased
 # # bert-base-cased
@@ -14,7 +14,7 @@ meta: meta.json
 word2idx: word2idx.json
 char2idx: char2idx.json
  
-device_num: 0
+device_num: 1
 
 wandb: true
 path_to_save_model: ../model_state
@@ -31,7 +31,7 @@ hyper_parameters:
  batch_size: 32
  parallel: false
  epochs: 100
- lr: 7e-5
+ lr: 6e-5
  seed: 2333
  log_interval: 10
  ## learning schedule
@@ -62,7 +62,7 @@ hyper_parameters:
    - 0.05
    - 0.
  ## bert: subword encoder
- use_bert: false
+ use_bert: true
  bert_config:
   path: ../../pretrained_models/biobert-large-cased-pubmed-58k # biobert_v1.0_pubmed_pmc
   use_last_k_layers: 1
@@ -94,7 +94,7 @@ hyper_parameters:
   shaking_type: cln_plus
   context_type: lstm
  ## encoding fc
- enc_hidden_size: 768
+ enc_hidden_size: 1024
  activate_enc_fc: false
  
 # when to save the model state dict
@@ -102,6 +102,6 @@ f1_2_save: 0
 # whether train from scratch
 fr_scratch: true
 # note 
-note: start from scratch;
+note: start from scratch; 1-layer lstm context
 # if not fr scratch, set a model_state_dict
 model_state_dict_path: stake

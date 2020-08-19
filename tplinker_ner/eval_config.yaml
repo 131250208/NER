@@ -1,7 +1,7 @@
 exp_name: genia
 model_state_dict_dir: ./wandb
 run_ids:
- - 1fa8u3qb
+ - 1g9bo9s9
 
 last_k_model: 1
 

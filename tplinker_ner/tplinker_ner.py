@@ -61,7 +61,7 @@ class HandshakingTaggingScheme:
         return matrix_spots: [(start_pos, end_pos, tag_id), ]
         '''
         matrix_spots = []
-        for point in torch.nonzero(shaking_tag): #  shaking_tag.nonzero() -> torch.nonzero(shaking_tag)
+        for point in torch.nonzero(shaking_tag, as_tuple = False): #  shaking_tag.nonzero() -> torch.nonzero(shaking_tag, as_tuple = False)
             shaking_idx, tag_idx = point[0].item(), point[1].item()
             matrix_points = self.shaking_idx2matrix_idx[shaking_idx]
             spot = (matrix_points[0], matrix_points[1], tag_idx)

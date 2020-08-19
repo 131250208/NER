@@ -71,7 +71,7 @@ class HandshakingKernel(nn.Module):
         elif context_type == "lstm":
             self.context_lstm = nn.LSTM(hidden_size, 
                            hidden_size, 
-                           num_layers = 2, 
+                           num_layers = 1, 
                            bidirectional = False, 
                            batch_first = True)
         elif context_type == "clngru":
