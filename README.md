@@ -29,7 +29,7 @@ pip install -e .
 ```
 
 ## Pretrained Model and Word Embeddings
-Download [BERT-BASE-CASED](https://huggingface.co/bert-base-cased) and put it under `../pretrained_models`. Download [word embeddings]() and put them under `../pretrained_emb`.
+Download [BERT-BASE-CASED](https://huggingface.co/bert-base-cased) and put it under `../pretrained_models`. Download [word embeddings](https://pan.baidu.com/s/1HcigyVBjsShTR2OAEzj5Og) (code: 8044) and put them under `../pretrained_emb`.
 
 ## Train
 Set configuration in `tplinker_ner/train_config.yaml`. Start training:
