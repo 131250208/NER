@@ -1,10 +1,6 @@
 # NestedNER
 
-## Requirements
-
-
-## Usage
-### Prerequisites
+## Prerequisites
 The main requirements are:
 * tqdm
 * flair
@@ -18,7 +14,7 @@ In the root directory, run
 ```bash
 pip install -e .
 ```
-### Data Format
+## Data Format
 ```
 {
   "id": "train_2975", 
@@ -32,16 +28,16 @@ pip install -e .
 }
 ```
 
-### Pretrained Model and Word Embeddings
+## Pretrained Model and Word Embeddings
 Download [BERT-BASE-CASED](https://huggingface.co/bert-base-cased) and put it under `../pretrained_models`. Download [word embeddings]() and put them under `../pretrained_emb`.
 
-### Train
+## Train
 Set configuration in `tplinker_ner/train_config.yaml`. Start training:
 ```
 cd tplinker_ner
 python train.py
 ```
 
-### Evaluation
+## Evaluation
 Set configuration in `tplinker_ner/eval_config.yaml`. Start evaluation by running `tplinker_ner/Evaluation.ipynb`
 
