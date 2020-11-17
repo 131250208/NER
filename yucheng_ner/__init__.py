@@ -1,2 +1,2 @@
-from NER.tplinker_ner import tplinker_ner
-from NER.ner_common import components, utils
+from yucheng_ner.tplinker_ner import tplinker_ner
+from yucheng_ner.ner_common import components, utils
