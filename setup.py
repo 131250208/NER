@@ -18,7 +18,7 @@ URL = 'https://github.com/131250208/yucheng_ner'
 EMAIL = 'wangyucheng@iie.ac.cn'
 AUTHOR = 'Andy Wong'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = 0.4
+VERSION = 0.5
 
 # What packages are required for this module to be executed?
 REQUIRED = [
@@ -28,7 +28,7 @@ REQUIRED = [
     "word2vec",
     "tqdm",
     "glove-python-binary==0.2.0",
-    "transformers>=3",
+    "transformers",
     "wandb",
 ]
 
