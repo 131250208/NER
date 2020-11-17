@@ -6,7 +6,7 @@ import copy
 import torch
 import torch.nn as nn
 import json
-from NER.ner_common.components import HandshakingKernel
+from yucheng_ner.ner_common.components import HandshakingKernel
 from torch.nn.parameter import Parameter
 from transformers import AutoModel
 from flair.data import Sentence
