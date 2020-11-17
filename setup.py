@@ -12,19 +12,19 @@ from shutil import rmtree
 from setuptools import find_packages, setup, Command
 
 # Package meta-data.
-NAME = 'NER'
+NAME = 'yucheng_ner'
 DESCRIPTION = 'Named Entities Recognition by Token Pair Linking'
-URL = 'https://github.com/131250208/NER'
+URL = 'https://github.com/131250208/yucheng_ner'
 EMAIL = 'wangyucheng@iie.ac.cn'
 AUTHOR = 'Andy Wong'
 REQUIRES_PYTHON = '>=3.6.0'
-VERSION = 0.1.0
+VERSION = 0.1
 
 # What packages are required for this module to be executed?
 REQUIRED = [
     "flair",
     "torch",
-    "yaml",
+    "pyyaml",
     "word2vec",
     "tqdm",
     "glove-python-binary==0.2.0",
