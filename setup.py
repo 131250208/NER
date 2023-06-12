@@ -28,7 +28,7 @@ REQUIRED = [
     "word2vec",
     "tqdm",
     "glove-python-binary==0.2.0",
-    "transformers==3.0.2",
+    "transformers==4.30.0",
     "wandb",
 ]
 
